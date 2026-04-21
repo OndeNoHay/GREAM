@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GraphRagExec - Local AI Server</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked@14/marked.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <h1>GraphRagExec</h1>
+            <div class="header-actions">
+                <button id="btn-settings" class="btn btn-icon" title="Settings">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="currentColor" d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/>
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Sidebar - Libraries -->
+            <aside class="sidebar">
+                <div class="sidebar-header">
+                    <h2>Libraries</h2>
+                    <button id="btn-new-library" class="btn btn-primary btn-sm">+ New</button>
+                </div>
+                <ul id="library-list" class="library-list">
+                    <!-- Libraries loaded dynamically -->
+                </ul>
+            </aside>
+
+            <!-- Content Area -->
+            <div class="content-area">
+                <!-- Tabs -->
+                <div class="tabs">
+                    <button class="tab active" data-tab="chat">Chat</button>
+                    <button class="tab" data-tab="search">Search</button>
+                    <button class="tab" data-tab="agents">Agents</button>
+                    <button class="tab" data-tab="ingest">Import Documents</button>
+                    <button class="tab" data-tab="sources">Sources</button>
+                </div>
+
+                <!-- Chat Tab -->
+                <div id="tab-chat" class="tab-content active">
+                    <div class="chat-container">
+                        <div id="chat-messages" class="chat-messages">
+                            <div class="chat-welcome">
+                                <h3>Ask a Question</h3>
+                                <p>Ask questions about your documents and get AI-generated answers with citations.</p>
+                            </div>
+                        </div>
+                        <div class="chat-input-area">
+                            <div class="chat-input-group">
+                                <textarea id="chat-input" placeholder="Ask a question about your documents..." rows="2"></textarea>
+                                <button id="btn-chat" class="btn btn-primary">Send</button>
+                                <button id="btn-chat-clear" class="btn btn-secondary" title="Clear chat">Clear</button>
+                            </div>
+                            <div class="chat-options">
+                                <label><input type="checkbox" id="chat-use-vector" checked> Vector</label>
+                                <label><input type="checkbox" id="chat-use-graph" checked> Graph</label>
+                                <label class="chat-options-topk">
+                                    Results:
+                                    <input type="number" id="chat-top-k" value="10" min="1" max="50" class="options-number-input">
+                                </label>
+                                <span class="chat-options-divider"></span>
+                                <label class="agent-select-label">
+                                    Agent:
+                                    <select id="chat-agent-select" class="chat-agent-select">
+                                        <option value="">None (RAG)</option>
+                                    </select>
+                                    <button id="btn-agent-info" class="btn-agent-info hidden" title="View agent configuration">i</button>
+                                </label>
+                                <label class="agent-auto-approve hidden" id="chat-auto-approve-label" title="Let the agent run without asking for approval on each tool call">
+                                    <input type="checkbox" id="chat-auto-approve"> Auto-approve
+                                </label>
+                                <span class="chat-options-divider"></span>
+                                <label title="Render markdown as formatted text. Uncheck to see raw markdown (useful for copy-paste into other apps).">
+                                    <input type="checkbox" id="chat-render-markdown" checked onchange="onMarkdownToggleChange()"> Render
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Search Tab -->
+                <div id="tab-search" class="tab-content">
+                    <div class="search-container">
+                        <div class="search-input-group">
+                            <input type="text" id="search-input" placeholder="Enter your search query..." />
+                            <button id="btn-search" class="btn btn-primary">Search</button>
+                        </div>
+                        <div class="search-options">
+                            <label><input type="checkbox" id="use-vector" checked> Vector Search</label>
+                            <label><input type="checkbox" id="use-graph" checked> Graph Search</label>
+                            <label>
+                                Results:
+                                <input type="number" id="search-top-k" value="10" min="1" max="100" class="options-number-input">
+                            </label>
+                        </div>
+                    </div>
+                    <div id="search-results" class="results-container">
+                        <p class="placeholder-text">Enter a query to search your documents</p>
+                    </div>
+                </div>
+
+                <!-- Ingest Tab -->
+                <div id="tab-ingest" class="tab-content">
+                    <div class="ingest-container">
+                        <!-- Drop Zone -->
+                        <div id="drop-zone" class="drop-zone">
+                            <div class="drop-zone-content">
+                                <svg viewBox="0 0 24 24" width="48" height="48">
+                                    <path fill="currentColor" d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/>
+                                </svg>
+                                <p>Drag & drop files here</p>
+                                <p class="small">or click to browse</p>
+                                <p class="small muted">Supported: PDF, DOCX, TXT, MD, XLSX, XML</p>
+                            </div>
+                            <input type="file" id="file-input" multiple accept=".pdf,.docx,.doc,.txt,.md,.markdown,.xlsx,.xls" />
+                        </div>
+
+                        <!-- Google Drive Import -->
+                        <div class="gdrive-import-section">
+                            <div class="divider-text">or import from Google Drive</div>
+                            <button id="btn-browse-gdrive" class="btn btn-secondary" disabled>
+                                <svg viewBox="0 0 24 24" width="18" height="18" style="margin-right: 8px;">
+                                    <path fill="currentColor" d="M7.71 3.5L1.15 15l3.43 6L11 11.5l-3.29-8zM8.52 11.5l-4.16 7.5H16.5L20.66 11.5H8.52zM12.5 3.5L9.21 11.5h11.43l3.29-6.5L16.5 3.5h-4z"/>
+                                </svg>
+                                Browse Google Drive
+                            </button>
+                            <p class="small muted" id="gdrive-hint">Connect Google Drive in Settings to enable</p>
+                        </div>
+
+                        <!-- Text Paste Area -->
+                        <div class="paste-container">
+                            <h3>Or paste text directly:</h3>
+                            <textarea id="paste-input" placeholder="Paste your text here (Ctrl+V)..."></textarea>
+                            <div class="paste-actions">
+                                <input type="text" id="source-name" placeholder="Source name (optional)" />
+                                <button id="btn-ingest-text" class="btn btn-primary">Import Text</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Upload Progress -->
+                    <div id="upload-progress" class="upload-progress hidden">
+                        <div class="progress-section">
+                            <div class="progress-label">
+                                <span id="embedding-stage-label">Embedding</span>
+                                <span id="embedding-percent">0%</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div id="embedding-progress-fill" class="progress-fill"></div>
+                            </div>
+                        </div>
+                        <div class="progress-section">
+                            <div class="progress-label">
+                                <span id="graph-stage-label">Graph Extraction</span>
+                                <span id="graph-percent">0%</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div id="graph-progress-fill" class="progress-fill"></div>
+                            </div>
+                        </div>
+                        <p id="progress-text" class="progress-text">Starting...</p>
+                    </div>
+                </div>
+
+                <!-- Agents Tab -->
+                <div id="tab-agents" class="tab-content">
+                    <div class="agents-container">
+                        <div class="agents-header">
+                            <h3>AI Agents</h3>
+                            <button id="btn-new-agent" class="btn btn-primary btn-sm">+ New Agent</button>
+                        </div>
+                        <div class="agents-grid">
+                            <div class="agents-list-section">
+                                <h4>Available Agents</h4>
+                                <ul id="agents-list" class="agents-list">
+                                    <!-- Agents loaded dynamically -->
+                                </ul>
+                            </div>
+                            <div class="agent-runner-section">
+                                <h4>Run Agent</h4>
+                                <div id="agent-runner" class="agent-runner">
+                                    <div class="agent-runner-select">
+                                        <label>Select Agent:</label>
+                                        <select id="agent-select" class="form-select">
+                                            <option value="">-- Select an agent --</option>
+                                        </select>
+                                    </div>
+                                    <div class="agent-runner-prompt">
+                                        <label>Task Description:</label>
+                                        <textarea id="agent-prompt" placeholder="Describe what you want the agent to do..." rows="4"></textarea>
+                                    </div>
+                                    <button id="btn-run-agent" class="btn btn-primary" disabled>Run Agent</button>
+                                </div>
+                                <div id="agent-execution-log" class="agent-execution-log hidden">
+                                    <div class="log-header">
+                                        <h5>Execution Log</h5>
+                                        <button id="btn-cancel-agent" class="btn btn-danger btn-sm">Cancel</button>
+                                    </div>
+                                    <div id="agent-log-content" class="log-content">
+                                        <!-- Log entries added dynamically -->
+                                    </div>
+                                </div>
+                                <div id="agent-approval-dialog" class="agent-approval-dialog hidden">
+                                    <div class="approval-header">
+                                        <span class="approval-icon">&#9888;</span>
+                                        <span>Approval Required</span>
+                                    </div>
+                                    <div class="approval-content">
+                                        <p id="approval-description"></p>
+                                        <div class="approval-details">
+                                            <strong>Tool:</strong> <span id="approval-tool"></span>
+                                            <pre id="approval-args"></pre>
+                                        </div>
+                                    </div>
+                                    <div class="approval-actions">
+                                        <button id="btn-approve" class="btn btn-primary">Approve</button>
+                                        <button id="btn-reject" class="btn btn-secondary">Reject</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sources Tab -->
+                <div id="tab-sources" class="tab-content">
+                    <div class="sources-container">
+                        <div class="sources-header">
+                            <h3>Imported Sources</h3>
+                            <div class="sources-actions">
+                                <button class="btn btn-secondary btn-sm" onclick="clearLibraryVectors()" title="Delete all vector embeddings">Clear Vectors</button>
+                                <button class="btn btn-secondary btn-sm" onclick="clearLibraryGraphs()" title="Delete all graph entities and relationships">Clear Graphs</button>
+                                <button class="btn btn-danger btn-sm" onclick="deleteCurrentLibrary()" title="Delete this library and all its data">Delete Library</button>
+                            </div>
+                        </div>
+                        <ul id="sources-list" class="sources-list">
+                            <!-- Sources loaded dynamically -->
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Settings Modal -->
+        <div id="settings-modal" class="modal hidden">
+            <div class="modal-content modal-settings">
+                <div class="modal-header">
+                    <h2>AI API Settings</h2>
+                    <button class="btn-close" onclick="closeModal('settings-modal')">&times;</button>
+                </div>
+                <div class="settings-tabs-nav">
+                    <button class="settings-tab-btn active" onclick="switchSettingsTab('api')">API</button>
+                    <button class="settings-tab-btn" onclick="switchSettingsTab('proxy')">Proxy &amp; SSL</button>
+                    <button class="settings-tab-btn" onclick="switchSettingsTab('graph')">Graph</button>
+                    <button class="settings-tab-btn" onclick="switchSettingsTab('relationships')">Relationships</button>
+                    <button class="settings-tab-btn" onclick="switchSettingsTab('integrations')">Integrations</button>
+                </div>
+                <div class="modal-body">
+
+                    <!-- API Tab -->
+                    <div id="settings-panel-api" class="settings-panel active">
+                        <div class="form-group">
+                            <label for="api-url">API Base URL</label>
+                            <input type="text" id="api-url" placeholder="http://localhost:11434/v1" />
+                        </div>
+                        <div class="form-group">
+                            <label for="api-key">API Key</label>
+                            <input type="password" id="api-key" placeholder="Enter API key..." />
+                        </div>
+                        <div class="models-load-row">
+                            <button type="button" class="btn btn-secondary btn-sm" id="btn-load-models" onclick="loadModels()" title="Load available models from the configured API">&#8635; Load models from API</button>
+                            <span id="models-load-status" class="form-help"></span>
+                        </div>
+                        <div class="form-group">
+                            <label for="embedding-model">Embedding Model</label>
+                            <div class="model-input-group">
+                                <input type="text" id="embedding-model" placeholder="nomic-embed-text" autocomplete="off" />
+                                <button type="button" class="btn btn-secondary btn-sm model-dropdown-btn" onclick="toggleModelDropdown('embedding-model')" title="Show available models">&#9662;</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="chat-model">Chat Model</label>
+                            <div class="model-input-group">
+                                <input type="text" id="chat-model" placeholder="llama3.2" autocomplete="off" />
+                                <button type="button" class="btn btn-secondary btn-sm model-dropdown-btn" onclick="toggleModelDropdown('chat-model')" title="Show available models">&#9662;</button>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="chunk-size">Chunk Size</label>
+                                <input type="number" id="chunk-size" min="100" max="4000" />
+                            </div>
+                            <div class="form-group">
+                                <label for="chunk-overlap">Chunk Overlap</label>
+                                <input type="number" id="chunk-overlap" min="0" max="500" />
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="max-conversation-history">Conversation History (messages, 0 = disabled)</label>
+                            <input type="number" id="max-conversation-history" min="0" max="20" />
+                        </div>
+                        <div class="test-connection">
+                            <button id="btn-test-connection" class="btn btn-secondary">Test Connection</button>
+                            <span id="connection-status"></span>
+                        </div>
+                    </div>
+
+                    <!-- Proxy & SSL Tab -->
+                    <div id="settings-panel-proxy" class="settings-panel">
+                        <div class="form-group">
+                            <label for="proxy-url">Proxy URL</label>
+                            <input type="text" id="proxy-url" placeholder="http://proxy.example.com:8080" />
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="proxy-username">Proxy Username</label>
+                                <input type="text" id="proxy-username" placeholder="username" />
+                            </div>
+                            <div class="form-group">
+                                <label for="proxy-password">Proxy Password</label>
+                                <input type="password" id="proxy-password" placeholder="password" />
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="ssl-certificate-path">SSL Certificate Path</label>
+                            <input type="text" id="ssl-certificate-path" placeholder="/path/to/ca-bundle.crt" />
+                        </div>
+                    </div>
+
+                    <!-- Graph Tab -->
+                    <div id="settings-panel-graph" class="settings-panel">
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="enable-graph" checked />
+                                Enable graph extraction during import
+                            </label>
+                            <p class="form-help">Disabling this speeds up document import significantly</p>
+                        </div>
+                        <div class="form-group">
+                            <label for="extraction-method">Extraction Method</label>
+                            <select id="extraction-method" class="form-select">
+                                <option value="regex">Regex (Fast, CPU-based)</option>
+                                <option value="llm">LLM (Accurate, GPU-accelerated)</option>
+                            </select>
+                            <p class="form-help">LLM extraction uses your chat model with GPU for more accurate entity and relationship detection</p>
+                        </div>
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="extract-proper-nouns" checked />
+                                Extract proper nouns (names, organizations)
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="extract-emails" />
+                                Extract email addresses
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="extract-urls" />
+                                Extract URLs
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="max-entities">Max Entities per Chunk</label>
+                            <input type="number" id="max-entities" min="1" max="50" value="15" />
+                        </div>
+                    </div>
+
+                    <!-- Relationships Tab -->
+                    <div id="settings-panel-relationships" class="settings-panel">
+                        <p class="form-help" style="margin-bottom:1rem">Configure which relationships to extract. Changes require re-importing documents.</p>
+
+                        <div class="relationship-section">
+                            <h4>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="rel-doc-structure" checked />
+                                    Document Structure
+                                </label>
+                            </h4>
+                            <div class="relationship-options">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="rel-next-chunk" checked />
+                                    NEXT_CHUNK (sequential chunks)
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="rel-same-page" checked />
+                                    SAME_PAGE (chunks on same page)
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="relationship-section">
+                            <h4>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="rel-component" checked />
+                                    Component Relations (Technical Docs)
+                                </label>
+                            </h4>
+                            <div class="relationship-options">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="rel-part-of" checked />
+                                    PART_OF (containment)
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="rel-connects-to" checked />
+                                    CONNECTS_TO (physical connections)
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="rel-supplies-to" checked />
+                                    SUPPLIES_TO (material/energy flow)
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="rel-controls" checked />
+                                    CONTROLS (control relationships)
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="relationship-section">
+                            <h4>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="rel-process" checked />
+                                    Process Relations (Procedures)
+                                </label>
+                            </h4>
+                            <div class="relationship-options">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="rel-precedes" checked />
+                                    PRECEDES (sequential order)
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="rel-triggers" checked />
+                                    TRIGGERS (cause-effect)
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="rel-requires" checked />
+                                    REQUIRES (dependencies)
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="relationship-section">
+                            <h4>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="rel-semantic" checked />
+                                    Semantic Relations (Co-occurrence)
+                                </label>
+                            </h4>
+                            <div class="relationship-options">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="rel-co-occurs-sentence" checked />
+                                    CO_OCCURS (same sentence - strong)
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="rel-co-occurs-chunk" checked />
+                                    CO_OCCURS (same chunk - weaker)
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="relationship-section">
+                            <h4>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="rel-hierarchy" />
+                                    Hierarchy Relations (Classifications)
+                                </label>
+                            </h4>
+                            <div class="relationship-options">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="rel-is-a" checked />
+                                    IS_A (type/classification)
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="rel-has-property" checked />
+                                    HAS_PROPERTY (attributes)
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Integrations Tab -->
+                    <div id="settings-panel-integrations" class="settings-panel">
+                        <h3>Google Drive</h3>
+
+                        <div class="form-group">
+                            <div id="gdrive-status" class="gdrive-status">
+                                <span class="status-indicator status-disconnected"></span>
+                                <span id="gdrive-status-text">Not connected</span>
+                            </div>
+                        </div>
+
+                        <div class="form-group" id="gdrive-credentials-section">
+                            <label for="gdrive-credentials">Credentials JSON</label>
+                            <p class="form-help">Upload your OAuth credentials.json from Google Cloud Console</p>
+                            <div class="file-upload-wrapper">
+                                <input type="file" id="gdrive-credentials" accept=".json" />
+                                <button id="btn-upload-credentials" class="btn btn-secondary btn-sm">Upload credentials.json</button>
+                            </div>
+                        </div>
+
+                        <div class="form-group" id="gdrive-connect-section">
+                            <button id="btn-gdrive-connect" class="btn btn-primary">Connect to Google Drive</button>
+                            <button id="btn-gdrive-disconnect" class="btn btn-danger hidden">Disconnect</button>
+                        </div>
+
+                        <div class="form-group" id="gdrive-auth-code-section" class="hidden">
+                            <label for="gdrive-auth-code">Authorization Code</label>
+                            <p class="form-help">Paste the authorization code from Google after granting access</p>
+                            <input type="text" id="gdrive-auth-code" placeholder="Paste authorization code here..." />
+                            <button id="btn-gdrive-complete-auth" class="btn btn-primary btn-sm">Complete Authentication</button>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="gdrive-export-format">Export Format for Google Docs/Sheets</label>
+                            <select id="gdrive-export-format" class="form-select">
+                                <option value="pdf">PDF</option>
+                                <option value="docx">DOCX (Word)</option>
+                                <option value="txt">Plain Text</option>
+                            </select>
+                            <p class="form-help">Google Docs and Sheets will be exported to this format before processing</p>
+                        </div>
+                    </div>
+
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="closeModal('settings-modal')">Cancel</button>
+                    <button id="btn-save-settings" class="btn btn-primary">Save Settings</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Library Modal -->
+        <div id="library-modal" class="modal hidden">
+            <div class="modal-content modal-sm">
+                <div class="modal-header">
+                    <h2 id="library-modal-title">New Library</h2>
+                    <button class="btn-close" onclick="closeModal('library-modal')">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="library-name">Name</label>
+                        <input type="text" id="library-name" placeholder="Library name..." />
+                    </div>
+                    <div class="form-group">
+                        <label for="library-description">Description</label>
+                        <textarea id="library-description" placeholder="Optional description..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="closeModal('library-modal')">Cancel</button>
+                    <button id="btn-save-library" class="btn btn-primary">Save</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Source Details Modal -->
+        <div id="source-details-modal" class="modal hidden">
+            <div class="modal-content modal-lg">
+                <div class="modal-header">
+                    <h2 id="source-details-title">Source Details</h2>
+                    <button class="btn-close" onclick="closeModal('source-details-modal')">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div id="source-details-loading" class="text-center">
+                        <div class="spinner"></div>
+                        <span>Loading details...</span>
+                    </div>
+                    <div id="source-details-content" class="hidden">
+                        <div class="details-section">
+                            <h3>Summary</h3>
+                            <div class="details-stats">
+                                <div class="stat-item">
+                                    <span class="stat-value" id="detail-chunk-count">0</span>
+                                    <span class="stat-label">Chunks</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-value" id="detail-entity-count">0</span>
+                                    <span class="stat-label">Entities</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="details-section">
+                            <h3>Chunks (Vectors)</h3>
+                            <div id="detail-chunks-list" class="detail-list"></div>
+                        </div>
+                        <div class="details-section">
+                            <h3>Extracted Entities</h3>
+                            <div id="detail-entities-list" class="detail-list"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="closeModal('source-details-modal')">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Agent Editor Modal -->
+        <div id="agent-editor-modal" class="modal hidden">
+            <div class="modal-content modal-lg">
+                <div class="modal-header">
+                    <h2 id="agent-editor-title">Create Agent</h2>
+                    <button class="btn-close" onclick="closeModal('agent-editor-modal')">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="edit-agent-id" value="">
+                    <div id="agent-template-notice" class="template-edit-notice hidden">
+                        Editing a built-in template. Changes will be saved as a customized version and override the default. You can restore the original by deleting your customized version.
+                    </div>
+                    <div class="form-group">
+                        <label for="agent-name">Name</label>
+                        <input type="text" id="agent-name" placeholder="Enter agent name..." maxlength="100" />
+                    </div>
+                    <div class="form-group">
+                        <label for="agent-description">Description</label>
+                        <input type="text" id="agent-description" placeholder="Brief description of what this agent does..." maxlength="500" />
+                    </div>
+                    <div class="form-group">
+                        <label for="agent-system-prompt">System Prompt</label>
+                        <textarea id="agent-system-prompt" rows="8" placeholder="Instructions that define the agent's behavior and expertise..."></textarea>
+                        <p class="form-help">Define the agent's role, expertise, and how it should approach tasks.</p>
+                    </div>
+                    <div class="form-group">
+                        <label>Allowed Tools</label>
+                        <div class="tools-grid">
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="agent-tool" value="search_documents" />
+                                search_documents - Vector similarity search
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="agent-tool" value="search_graph" />
+                                search_graph - Knowledge graph traversal
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="agent-tool" value="get_entities" />
+                                get_entities - Get document entities
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="agent-tool" value="get_relationships" />
+                                get_relationships - Get entity relationships
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="agent-tool" value="compare_documents" />
+                                compare_documents - Compare two documents
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="agent-tool" value="get_document_chunks" />
+                                get_document_chunks - Get raw text chunks
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="agent-tool" value="summarize_text" />
+                                summarize_text - Generate summaries
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="agent-tool" value="delegate_to_agent" />
+                                delegate_to_agent - Delegate tasks to other agents
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="agent-approval-mode">Approval Mode</label>
+                            <select id="agent-approval-mode" class="form-select">
+                                <option value="always">Always require approval</option>
+                                <option value="never">No approval needed</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="agent-max-iterations">Max Iterations</label>
+                            <input type="number" id="agent-max-iterations" value="10" min="1" max="50" />
+                        </div>
+                        <div class="form-group">
+                            <label for="agent-temperature">Temperature</label>
+                            <input type="number" id="agent-temperature" value="0.3" min="0" max="1" step="0.1" />
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="closeModal('agent-editor-modal')">Cancel</button>
+                    <button id="btn-save-agent" class="btn btn-primary">Save Agent</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Google Drive Browser Modal -->
+        <div id="gdrive-browser-modal" class="modal hidden">
+            <div class="modal-content modal-lg">
+                <div class="modal-header">
+                    <h2>Google Drive</h2>
+                    <button class="btn-close" onclick="closeModal('gdrive-browser-modal')">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <!-- Breadcrumb navigation -->
+                    <div id="gdrive-breadcrumb" class="gdrive-breadcrumb">
+                        <span class="breadcrumb-item" data-id="root">My Drive</span>
+                    </div>
+
+                    <!-- File list -->
+                    <div id="gdrive-file-list" class="gdrive-file-list">
+                        <div class="gdrive-loading">
+                            <div class="spinner"></div>
+                            <span>Loading files...</span>
+                        </div>
+                    </div>
+
+                    <!-- Selection info -->
+                    <div class="gdrive-selection-info">
+                        <span id="gdrive-selection-count">0 files selected</span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="closeModal('gdrive-browser-modal')">Cancel</button>
+                    <button id="btn-gdrive-import" class="btn btn-primary" disabled>Import Selected</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Agent Info Modal -->
+        <div id="agent-info-modal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 id="agent-info-title">Agent Configuration</h2>
+                    <button class="btn-close" onclick="closeModal('agent-info-modal')">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="agent-info-section">
+                        <label>Description</label>
+                        <p id="agent-info-description" class="agent-info-value"></p>
+                    </div>
+                    <div class="agent-info-section">
+                        <label>System Prompt</label>
+                        <pre id="agent-info-prompt" class="agent-info-prompt"></pre>
+                    </div>
+                    <div class="agent-info-grid">
+                        <div class="agent-info-section">
+                            <label>Tools</label>
+                            <ul id="agent-info-tools" class="agent-info-tools"></ul>
+                        </div>
+                        <div class="agent-info-section">
+                            <label>Parameters</label>
+                            <div id="agent-info-params" class="agent-info-params"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Entity Neighbors Modal -->
+        <div id="entity-modal" class="modal hidden">
+            <div class="modal-content modal-entity">
+                <div class="modal-header">
+                    <div>
+                        <h2 id="entity-modal-title"></h2>
+                        <span id="entity-modal-type" class="entity-modal-type-badge"></span>
+                    </div>
+                    <button class="btn-close" onclick="closeModal('entity-modal')">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div id="entity-modal-loading" class="entity-modal-loading hidden">
+                        <div class="spinner"></div>
+                        <span>Loading relationships...</span>
+                    </div>
+                    <div id="entity-modal-content"></div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="closeModal('entity-modal')">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Container -->
+        <div id="toast-container"></div>
+    </div>
+
+    <!-- Console toggle button (fixed, bottom-right) -->
+    <button id="btn-console" class="btn-console" onclick="toggleConsole()" title="Toggle console log">&#9654; Console</button>
+
+    <!-- Console panel (collapsible) -->
+    <div id="console-panel" class="console-panel hidden">
+        <div class="console-header" onclick="toggleConsole()">
+            <span>Console</span>
+            <span id="console-toggle-icon">&#x25B2;</span>
+            <button class="console-clear-btn" onclick="event.stopPropagation(); clearConsole()">Clear</button>
+        </div>
+        <div id="console-output" class="console-output"></div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

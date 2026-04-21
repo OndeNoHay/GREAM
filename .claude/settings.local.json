@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''app/services/graph_db.py''\\).read\\(\\)\\); print\\(''graph_db.py OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''app/api/routes/search.py''\\).read\\(\\)\\); print\\(''search.py OK''\\)\")",
+      "Bash(xargs grep:*)",
+      "Bash(python -c \":*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git checkout:*)",
+      "Bash(git merge:*)",
+      "Bash(git push:*)",
+      "Bash(python3 -c \"from openai import RateLimitError, APIStatusError, APIConnectionError; print\\(''OK''\\)\")",
+      "Bash(python3 -c \"import openai; print\\(dir\\(openai\\)\\)\")",
+      "Bash(find /c/AI/GraphRagExec/venv -name *.py -path */openai/_exceptions*)",
+      "Bash(python -c \"from app.api.routes.logs import router; from app.services.graph_db import RateLimitWait; print\\(''imports OK''\\)\")",
+      "Bash(python -c \"from app.main import app; print\\(''app startup OK''\\)\")",
+      "Bash(python -c \"from app.main import app; from app.api.routes.search import ChatRequest, ConversationMessage; from app.config import get_settings_manager; s = get_settings_manager\\(\\); print\\(''max_conversation_history default:'', s.ai_settings.max_conversation_history\\); print\\(''OK''\\)\")",
+      "Bash(grep -E \"\\\\.\\(html|tsx|ts|jsx|js|py\\)$\")",
+      "WebSearch",
+      "WebFetch(domain:nvd.nist.gov)",
+      "Bash(grep -rn \"re\\\\\\\\.compile\\\\|re\\\\\\\\.finditer\\\\|re\\\\\\\\.sub\\\\|re\\\\\\\\.search\\\\|PATTERN\" /c/AI/GraphRagExec/app --include=\"*.py\")",
+      "Bash(grep -rn \"re\\\\\\\\.finditer\\\\|re\\\\\\\\.sub\\\\|sentence\\\\|split\" /c/AI/GraphRagExec/app/services/graph_db.py)"
+    ]
+  }
+}
