@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- S1000D Issue 4.2 Data Module — ATA 32 Hydraulic Power System (Description) -->
+<dmodule xmlns:dc="http://www.purl.org/dc/elements/1.1/"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+
+  <identAndStatusSection>
+    <dmAddress>
+      <dmIdent>
+        <dmCode modelIdentCode="ATEST" systemDiffCode="A" systemCode="32"
+                subSystemCode="0" subSubSystemCode="0" assyCode="00"
+                disassyCode="00" disassyCodeVariant="A" infoCode="040"
+                infoCodeVariant="A" itemLocationCode="D"/>
+        <issueInfo issueNumber="001" inWork="00"/>
+        <language languageIsoCode="en" countryIsoCode="US"/>
+      </dmIdent>
+      <dmAddressItems>
+        <dmTitle>
+          <techName>Hydraulic Power System</techName>
+          <infoName>Description</infoName>
+        </dmTitle>
+        <issueDate year="2024" month="01" day="15"/>
+      </dmAddressItems>
+    </dmAddress>
+    <dmStatus issueType="new">
+      <security securityClassification="01"/>
+      <responsiblePartnerCompany enterpriseCode="ATEXIS"/>
+      <originator enterpriseCode="ATEXIS"/>
+      <applic>
+        <displayText><simplePara>ATEST Model Series — All</simplePara></displayText>
+      </applic>
+      <brexDmRef>
+        <dmRef>
+          <dmRefIdent>
+            <dmCode modelIdentCode="ATEST" systemDiffCode="A" systemCode="00"
+                    subSystemCode="0" subSubSystemCode="0" assyCode="00"
+                    disassyCode="00" disassyCodeVariant="A" infoCode="022"
+                    infoCodeVariant="A" itemLocationCode="D"/>
+          </dmRefIdent>
+        </dmRef>
+      </brexDmRef>
+      <qualityAssurance>
+        <unverified/>
+      </qualityAssurance>
+    </dmStatus>
+  </identAndStatusSection>
+
+  <content>
+    <description>
+      <levelledPara id="HYD-SYS-OVERVIEW">
+        <title>General</title>
+        <para>The ATEST aircraft hydraulic power system supplies pressurized hydraulic
+        fluid at 3000 PSI to operate the following systems:
+        </para>
+        <para>
+          <sequentialList>
+            <listItem><para>Landing gear extension and retraction system (ATA 32)</para></listItem>
+            <listItem><para>Flight control actuation system (ATA 27)</para></listItem>
+            <listItem><para>Wheel brake system (ATA 32)</para></listItem>
+            <listItem><para>Nose wheel steering system (ATA 32)</para></listItem>
+          </sequentialList>
+        </para>
+      </levelledPara>
+
+      <levelledPara id="HYD-PRV-DESC">
+        <title>Pressure Regulator Valve (PRV)</title>
+        <para>The Pressure Regulator Valve (PRV), Part Number HYD-PRV-3A (current)
+        or HYD-PRV-4B (replacement per AMB HYD-2024-001), regulates hydraulic system
+        pressure to 3000 PSI ±100 PSI nominal operating range.</para>
+        <para>The PRV is located on the hydraulic power pack assembly behind Access
+        Panel HYD-20 on the left side of the fuselage.</para>
+        <para>
+          <table>
+            <tgroup cols="2">
+              <colspec colname="col1" colwidth="1*"/>
+              <colspec colname="col2" colwidth="2*"/>
+              <thead>
+                <row><entry>Parameter</entry><entry>Value</entry></row>
+              </thead>
+              <tbody>
+                <row><entry>Nominal pressure</entry><entry>3000 PSI</entry></row>
+                <row><entry>Operating range</entry><entry>2900–3100 PSI</entry></row>
+                <row><entry>Maximum pressure</entry><entry>3400 PSI (relief)</entry></row>
+                <row><entry>Fluid specification</entry><entry>Mil-PRF-5606 (hydraulic oil, red)</entry></row>
+                <row><entry>Current PRV P/N</entry><entry>HYD-PRV-3A</entry></row>
+                <row><entry>Replacement PRV P/N</entry><entry>HYD-PRV-4B (per AMB HYD-2024-001)</entry></row>
+              </tbody>
+            </tgroup>
+          </table>
+        </para>
+      </levelledPara>
+
+      <levelledPara id="HYD-FLUID-SPEC">
+        <title>Hydraulic Fluid</title>
+        <para>The hydraulic system uses Mil-PRF-5606 mineral-based hydraulic fluid
+        (coloured red for identification). The system capacity is 4.5 litres.
+        Do not mix with phosphate ester fluids (Skydrol type). Mixing causes seal
+        degradation and system failure.</para>
+      </levelledPara>
+    </description>
+  </content>
+
+</dmodule>

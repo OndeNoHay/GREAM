@@ -1,0 +1,227 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- S1000D Issue 4.2 Data Module — ATA 32-10 Landing Gear System (Maintenance Procedure) -->
+<dmodule xmlns:dc="http://www.purl.org/dc/elements/1.1/"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+
+  <identAndStatusSection>
+    <dmAddress>
+      <dmIdent>
+        <dmCode modelIdentCode="ATEST" systemDiffCode="A" systemCode="32"
+                subSystemCode="1" subSubSystemCode="0" assyCode="00"
+                disassyCode="00" disassyCodeVariant="A" infoCode="520"
+                infoCodeVariant="A" itemLocationCode="D"/>
+        <issueInfo issueNumber="001" inWork="00"/>
+        <language languageIsoCode="en" countryIsoCode="US"/>
+      </dmIdent>
+      <dmAddressItems>
+        <dmTitle>
+          <techName>Landing Gear System</techName>
+          <infoName>Retraction System — Functional Check</infoName>
+        </dmTitle>
+        <issueDate year="2024" month="01" day="15"/>
+      </dmAddressItems>
+    </dmAddress>
+    <dmStatus issueType="new">
+      <security securityClassification="01"/>
+      <responsiblePartnerCompany enterpriseCode="ATEXIS"/>
+      <originator enterpriseCode="ATEXIS"/>
+      <applic>
+        <displayText><simplePara>ATEST Model Series — All</simplePara></displayText>
+      </applic>
+      <qualityAssurance>
+        <unverified/>
+      </qualityAssurance>
+    </dmStatus>
+  </identAndStatusSection>
+
+  <content>
+    <procedure>
+      <preliminaryRqmts>
+        <reqCondGroup>
+          <reqCond>
+            <para>Aircraft jacked and supported on maintenance stands (ATA 07).</para>
+          </reqCond>
+          <reqCond>
+            <para>Hydraulic system pressurized at 3000 PSI ±100 PSI (ATA 29).</para>
+          </reqCond>
+          <reqCond>
+            <para>Gear warning circuit armed and cockpit gear handle in DOWN position.</para>
+          </reqCond>
+        </reqCondGroup>
+        <reqPersons>
+          <reqPerson>
+            <para>Two licensed aircraft maintenance engineers (AMEs) required:
+            one in cockpit, one observing gear bays.</para>
+          </reqPerson>
+        </reqPersons>
+        <reqSupplies>
+          <supply>
+            <para>Hydraulic fluid Mil-PRF-5606 (for top-up if required)</para>
+          </supply>
+          <supply>
+            <para>Hydraulic pressure gauge, calibrated, 0–5000 PSI</para>
+          </supply>
+          <supply>
+            <para>Stopwatch or calibrated timer</para>
+          </supply>
+          <supply>
+            <para>Torque wrench, 0–50 Nm</para>
+          </supply>
+        </reqSupplies>
+        <reqSafety>
+          <warning>
+            <warningAndCautionPara>WARNING: Keep clear of all gear bays and door travel paths
+            during retraction and extension cycles. Inadvertent gear movement can cause
+            serious injury or death.</warningAndCautionPara>
+          </warning>
+          <warning>
+            <warningAndCautionPara>WARNING: Aircraft must be securely supported on jacks
+            before performing any gear retraction test. Loss of aircraft support can result
+            in structural damage and personal injury.</warningAndCautionPara>
+          </warning>
+          <caution>
+            <warningAndCautionPara>CAUTION: Do not exceed three (3) retraction/extension
+            cycles without allowing a 5-minute hydraulic system cooling period.</warningAndCautionPara>
+          </caution>
+          <caution>
+            <warningAndCautionPara>CAUTION: Verify hydraulic fluid level before and after
+            the test. Do not operate the hydraulic system below minimum fluid level.</warningAndCautionPara>
+          </caution>
+        </reqSafety>
+      </preliminaryRqmts>
+
+      <mainProcedure>
+        <proceduralStep id="STEP-PRE-CHECK">
+          <para>Pre-check actions:</para>
+          <proceduralStep>
+            <para>Verify aircraft is level on jacks. Check jack pad pressures are nominal.</para>
+          </proceduralStep>
+          <proceduralStep>
+            <para>Confirm hydraulic system pressure reads 3000 PSI ±100 PSI on cockpit
+            hydraulic pressure indicator.</para>
+          </proceduralStep>
+          <proceduralStep>
+            <para>Confirm gear position indicator shows three GREEN lights (gear down
+            and locked).</para>
+          </proceduralStep>
+          <proceduralStep>
+            <para>Confirm second AME is clear of all gear bays and door travel paths.
+            Establish voice communication between cockpit and bay observer.</para>
+          </proceduralStep>
+        </proceduralStep>
+
+        <proceduralStep id="STEP-RETRACT-CYCLE">
+          <para>Retraction cycle — Cycle 1 of 3:</para>
+          <proceduralStep>
+            <para>Cockpit AME: Place gear handle in UP position.</para>
+          </proceduralStep>
+          <proceduralStep>
+            <para>Start timer simultaneously with gear handle movement to UP.</para>
+          </proceduralStep>
+          <proceduralStep>
+            <para>Observe: all three RED lights illuminate (gear in transit).</para>
+          </proceduralStep>
+          <proceduralStep>
+            <para>Bay observer: confirm inboard gear doors open before gear leg movement
+            begins. Report any abnormal noise or binding to cockpit AME.</para>
+          </proceduralStep>
+          <proceduralStep>
+            <para>Stop timer when cockpit gear position indicator shows lights OFF (gear
+            up and locked).</para>
+          </proceduralStep>
+          <proceduralStep>
+            <para>Record retraction time. Acceptance criterion: retraction time ≤ 8 seconds.
+            If retraction time exceeds 8 seconds, stop test and refer to fault isolation
+            procedure in AMM 32-30-00.</para>
+          </proceduralStep>
+        </proceduralStep>
+
+        <proceduralStep id="STEP-EXTEND-CYCLE">
+          <para>Extension cycle — Cycle 1 of 3:</para>
+          <proceduralStep>
+            <para>Cockpit AME: Place gear handle in DOWN position.</para>
+          </proceduralStep>
+          <proceduralStep>
+            <para>Start timer simultaneously with gear handle movement to DOWN.</para>
+          </proceduralStep>
+          <proceduralStep>
+            <para>Observe: all three RED lights illuminate (gear in transit).</para>
+          </proceduralStep>
+          <proceduralStep>
+            <para>Stop timer when cockpit gear position indicator shows three GREEN lights
+            (gear down and locked).</para>
+          </proceduralStep>
+          <proceduralStep>
+            <para>Record extension time. Acceptance criterion: extension time ≤ 10 seconds
+            (normal hydraulic power). If extension time exceeds 10 seconds, stop test
+            and refer to AMM 32-30-00 fault isolation.</para>
+          </proceduralStep>
+          <proceduralStep>
+            <para>Bay observer: confirm outboard gear doors are fully closed with gear
+            in the down-and-locked position. Report any gap or misalignment.</para>
+          </proceduralStep>
+        </proceduralStep>
+
+        <proceduralStep id="STEP-REPEAT-CYCLES">
+          <para>Repeat STEP-RETRACT-CYCLE and STEP-EXTEND-CYCLE two more times (Cycles 2 and 3)
+          to complete the full three-cycle test. Record all retraction and extension times.
+          All six recorded times must meet acceptance criteria before proceeding.</para>
+        </proceduralStep>
+
+        <proceduralStep id="STEP-EMERGENCY-GRAVITY">
+          <para>Emergency free-fall extension check (if required by maintenance program):</para>
+          <proceduralStep>
+            <para>Ensure gear is in the UP and locked position.</para>
+          </proceduralStep>
+          <proceduralStep>
+            <para>Deactivate hydraulic power to the landing gear retraction circuit
+            per AMM 29-10-00.</para>
+          </proceduralStep>
+          <proceduralStep>
+            <para>Operate emergency gear extension handle. Start timer.</para>
+          </proceduralStep>
+          <proceduralStep>
+            <para>Stop timer when three GREEN lights illuminate.</para>
+          </proceduralStep>
+          <proceduralStep>
+            <para>Record emergency extension time. Acceptance criterion: ≤ 15 seconds.
+            Verify nitrogen backup pressure per AMM 32-60-00 if time is marginal.</para>
+          </proceduralStep>
+        </proceduralStep>
+
+        <proceduralStep id="STEP-POST-CHECK">
+          <para>Post-test actions:</para>
+          <proceduralStep>
+            <para>Confirm gear position indicator shows three GREEN lights (gear down
+            and locked) at end of test.</para>
+          </proceduralStep>
+          <proceduralStep>
+            <para>Check hydraulic fluid level. Top up with Mil-PRF-5606 if required.
+            Record quantity added.</para>
+          </proceduralStep>
+          <proceduralStep>
+            <para>Inspect all hydraulic lines and fittings for leakage. No leakage
+            is permitted. If leakage found, isolate and rectify before returning
+            aircraft to service.</para>
+          </proceduralStep>
+          <proceduralStep>
+            <para>Make maintenance record entry: retraction/extension times recorded,
+            acceptance criteria met (or deferred rectification reference if not met),
+            date, AME license number, signature.</para>
+          </proceduralStep>
+        </proceduralStep>
+      </mainProcedure>
+
+      <closeRqmts>
+        <reqCondGroup>
+          <reqCond>
+            <para>Aircraft lowered from jacks per AMM 07-10-00 only after confirming:
+            gear down and locked (three GREEN), hydraulic pressure nominal,
+            no fluid leaks found.</para>
+          </reqCond>
+        </reqCondGroup>
+      </closeRqmts>
+    </procedure>
+  </content>
+
+</dmodule>

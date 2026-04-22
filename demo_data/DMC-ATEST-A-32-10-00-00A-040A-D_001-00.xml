@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- S1000D Issue 4.2 Data Module — ATA 32-10 Landing Gear System (Description) -->
+<dmodule xmlns:dc="http://www.purl.org/dc/elements/1.1/"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+
+  <identAndStatusSection>
+    <dmAddress>
+      <dmIdent>
+        <dmCode modelIdentCode="ATEST" systemDiffCode="A" systemCode="32"
+                subSystemCode="1" subSubSystemCode="0" assyCode="00"
+                disassyCode="00" disassyCodeVariant="A" infoCode="040"
+                infoCodeVariant="A" itemLocationCode="D"/>
+        <issueInfo issueNumber="001" inWork="00"/>
+        <language languageIsoCode="en" countryIsoCode="US"/>
+      </dmIdent>
+      <dmAddressItems>
+        <dmTitle>
+          <techName>Landing Gear System</techName>
+          <infoName>Description</infoName>
+        </dmTitle>
+        <issueDate year="2024" month="01" day="15"/>
+      </dmAddressItems>
+    </dmAddress>
+    <dmStatus issueType="new">
+      <security securityClassification="01"/>
+      <responsiblePartnerCompany enterpriseCode="ATEXIS"/>
+      <originator enterpriseCode="ATEXIS"/>
+      <applic>
+        <displayText><simplePara>ATEST Model Series — All</simplePara></displayText>
+      </applic>
+      <qualityAssurance>
+        <unverified/>
+      </qualityAssurance>
+    </dmStatus>
+  </identAndStatusSection>
+
+  <content>
+    <description>
+      <levelledPara id="LG-OVERVIEW">
+        <title>General</title>
+        <para>The ATEST aircraft is equipped with a tricycle retractable landing gear
+        configuration consisting of:
+        </para>
+        <para>
+          <sequentialList>
+            <listItem><para>One nose gear assembly (forward fuselage)</para></listItem>
+            <listItem><para>Two main gear assemblies (left and right wing roots)</para></listItem>
+          </sequentialList>
+        </para>
+        <para>All gear legs retract into bays with flush-fitting doors operated by the
+        hydraulic system. Gear extension and retraction uses hydraulic actuators
+        supplied at 3000 PSI by the hydraulic power system (ATA 29).</para>
+      </levelledPara>
+
+      <levelledPara id="LG-RETRACT-SYS">
+        <title>Retraction System</title>
+        <para>The retraction cylinder assembly converts hydraulic pressure into
+        linear motion to retract and extend the main gear leg. Each main gear has one
+        retraction cylinder (P/N LG-CYL-MN-L for left, LG-CYL-MN-R for right).</para>
+        <para>
+          <table>
+            <tgroup cols="2">
+              <colspec colname="col1" colwidth="1*"/>
+              <colspec colname="col2" colwidth="2*"/>
+              <thead>
+                <row><entry>Parameter</entry><entry>Value</entry></row>
+              </thead>
+              <tbody>
+                <row><entry>Operating pressure</entry><entry>3000 PSI (supplied by ATA 29)</entry></row>
+                <row><entry>Retraction time</entry><entry>≤ 8 seconds</entry></row>
+                <row><entry>Extension time</entry><entry>≤ 10 seconds (normal); ≤ 15 s (emergency free-fall)</entry></row>
+                <row><entry>Retraction cylinder stroke</entry><entry>320 mm</entry></row>
+                <row><entry>Emergency extension</entry><entry>Gravity free-fall + nitrogen backup</entry></row>
+              </tbody>
+            </tgroup>
+          </table>
+        </para>
+      </levelledPara>
+
+      <levelledPara id="LG-DOOR-SYS">
+        <title>Gear Door System</title>
+        <para>Each main gear bay has inboard and outboard doors. The inboard door
+        opens first (powered by hydraulic actuator), followed by gear extension,
+        then inboard door closes. The outboard door opens with the gear and closes
+        after gear is down and locked.</para>
+        <para>Door position is monitored by proximity sensors feeding the gear
+        position indication system in the cockpit.</para>
+      </levelledPara>
+
+      <levelledPara id="LG-INDICATION">
+        <title>Gear Position Indication</title>
+        <para>The cockpit gear position indicator shows three green lights (gear down
+        and locked), three red lights (gear in transit or unsafe), or lights off
+        (gear up and locked). The indicator is powered by the avionics bus.</para>
+        <para>A gear warning horn sounds when the throttle is reduced below approach
+        power and gear is not down and locked.</para>
+      </levelledPara>
+    </description>
+  </content>
+
+</dmodule>

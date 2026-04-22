@@ -1,0 +1,93 @@
+================================================================================
+AIRCRAFT MAINTENANCE BULLETIN
+AMB Reference: HYD-2024-001
+ATA Chapter: 29 — Hydraulic Power
+Issue Date: 2024-11-15
+Revision: 01
+Applicability: ATEST Model Series, All Serial Numbers
+Classification: MANDATORY (Category B — 600 flight hours or 12 months)
+================================================================================
+
+SUBJECT: Replacement of Hydraulic System Pressure Regulator Valve (PRV)
+         Part Number: HYD-PRV-3A (superseded by HYD-PRV-4B)
+
+1. REASON
+
+Hydraulic pressure oscillations (±200 PSI above normal system pressure of 3000 PSI)
+have been reported in service. Root cause analysis identified premature wear on the
+internal seat of the Pressure Regulator Valve (PRV), Part Number HYD-PRV-3A.
+A redesigned valve (HYD-PRV-4B) with an improved Inconel 718 seat is available
+as a direct replacement.
+
+Failure mode: if the PRV seat degrades beyond 0.08 mm wear, system pressure can
+exceed 3400 PSI, potentially causing hydraulic hose failures and landing gear
+retraction anomalies.
+
+2. DESCRIPTION OF WORK
+
+The maintenance task requires removal and replacement of the hydraulic PRV located
+on the hydraulic power pack assembly (Access Panel HYD-20). The procedure also
+includes a functional test of the hydraulic system at operating pressure.
+
+Estimated maintenance time: 2.5 man-hours.
+Special tooling required: pressure gauge (0–5000 PSI), hydraulic fluid
+collection equipment, torque wrench (0–50 Nm).
+
+3. PARTS REQUIRED
+
+Item  Part Number    Description                         Qty  Unit
+1     HYD-PRV-4B     Pressure Regulator Valve (revised)   1   EA
+2     OR-2345-V      O-Ring, Viton 2.5 mm                 2   EA
+3     HYD-F-BLUE     Hydraulic Fluid (Mil-PRF-5606)       1   QT (as req'd)
+
+Old PRV (HYD-PRV-3A) must be returned to the manufacturer for analysis.
+
+4. ACCOMPLISHMENT INSTRUCTIONS
+
+4.1 WARNINGS
+WARNING: Depressurize the hydraulic system to 0 PSI before starting work.
+         Failure to depressurize can cause hydraulic fluid injection injury.
+WARNING: Hydraulic fluid is flammable. Keep away from ignition sources.
+
+4.2 CAUTIONS
+CAUTION: Do not overtighten the PRV mounting bolts. Apply torque to 25 Nm ±2 Nm.
+CAUTION: Ensure all hydraulic fittings are clean and free of debris before installation.
+
+4.3 PROCEDURE SUMMARY
+Step 1: Depressurize the hydraulic system. Verify system pressure = 0 PSI.
+Step 2: Open Access Panel HYD-20 on the left side of the fuselage.
+Step 3: Disconnect hydraulic lines from the PRV. Cap all open ports immediately.
+Step 4: Remove PRV mounting bolts (4x M8). Remove PRV HYD-PRV-3A.
+Step 5: Inspect PRV mounting interface for damage. Clean seating surface.
+Step 6: Install new O-rings (OR-2345-V) on replacement PRV HYD-PRV-4B.
+Step 7: Install PRV HYD-PRV-4B. Torque mounting bolts to 25 Nm ±2 Nm.
+Step 8: Connect hydraulic lines. Torque hydraulic fittings per AMM 29-10-00.
+Step 9: Restore hydraulic system pressure. Perform functional test per AMM 29-00-00.
+Step 10: Verify system pressure = 3000 PSI ±100 PSI under normal load.
+Step 11: Check for leaks at all connections. No leakage permitted.
+Step 12: Close Access Panel HYD-20. Make appropriate maintenance record entry.
+
+5. TEST AND VERIFICATION
+
+After installation, perform the Hydraulic System Operational Test:
+- Pressurize system to 3000 PSI nominal
+- Cycle landing gear: 3 complete retraction/extension cycles
+- Verify PRV maintains pressure within 2900–3100 PSI throughout cycling
+- Verify no hydraulic fluid leakage at PRV or connected lines
+
+6. REFERENCE DOCUMENTATION
+
+- AMM Chapter 29-10-00: Hydraulic Power — Maintenance Practices
+- AMM Chapter 29-00-00: Hydraulic Power — General
+- AMM Chapter 32-30-00: Landing Gear — Extension and Retraction System
+- IPC Chapter 29-10-00: Hydraulic Power — Parts Catalog
+
+7. SIGN-OFF
+
+This Maintenance Bulletin must be performed by an appropriately licensed aircraft
+maintenance engineer. Record in aircraft technical log: AMB HYD-2024-001 Rev.01
+accomplished, date, technician license number, signature.
+
+================================================================================
+END OF MAINTENANCE BULLETIN HYD-2024-001
+================================================================================
