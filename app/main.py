@@ -6,6 +6,7 @@ configures API routes, and serves the web interface.
 """
 
 import logging
+import yaml
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
@@ -31,15 +32,60 @@ from app.api.routes import (
     google_drive_router,
     agents_router,
     logs_router,
+    viewer_router,
 )
 from app.services.vector_db import get_vector_db_service
 from app.services.graph_db import get_graph_db_service
 from app.services.library_manager import get_library_manager
+from app.services.mcp_client_manager import get_mcp_client_manager
+from app.services.mcp_registry import get_mcp_registry
+from app.models.agents import MCPServerConfig
 
 logger = logging.getLogger(__name__)
 
 # Get the app directory path
 APP_DIR = Path(__file__).parent
+_MCP_CONFIG_PATH = Path(__file__).parent.parent / "config" / "mcp_servers.yaml"
+
+
+def _start_mcp_servers() -> None:
+    """
+    Carga config/mcp_servers.yaml y arranca en background los servidores habilitados.
+
+    El arranque es asíncrono (fire-and-forget) para no bloquear el startup de FastAPI.
+    Los servidores estarán disponibles unos segundos después del arranque.
+    """
+    if not _MCP_CONFIG_PATH.exists():
+        logger.info("No MCP config found at %s — skipping MCP startup", _MCP_CONFIG_PATH)
+        return
+
+    try:
+        with open(_MCP_CONFIG_PATH, encoding="utf-8") as f:
+            raw = yaml.safe_load(f)
+    except Exception as exc:
+        logger.error("Failed to load MCP config: %s", exc)
+        return
+
+    servers = raw.get("servers", [])
+    enabled = [s for s in servers if s.get("enabled", False)]
+
+    if not enabled:
+        logger.info("No MCP servers enabled in %s", _MCP_CONFIG_PATH.name)
+        return
+
+    import asyncio
+
+    mcp_manager = get_mcp_client_manager()
+    registry = get_mcp_registry()
+
+    async def _launch_all() -> None:
+        for srv_dict in enabled:
+            config = MCPServerConfig(**srv_dict)
+            await mcp_manager.start_server(config)
+        await registry.refresh()
+
+    # Schedule in the running event loop (FastAPI's lifespan is already async)
+    asyncio.ensure_future(_launch_all())
 
 
 @asynccontextmanager
@@ -70,13 +116,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Initializing library manager...")
     get_library_manager()
 
+    # Start MCP servers declared in config/mcp_servers.yaml
+    _start_mcp_servers()
+
     logger.info("All services initialized successfully!")
     logger.info("Server is ready to accept requests.")
 
     yield
 
-    # Shutdown
-    logger.info("Shutting down GraphRagExec server...")
+    # Shutdown: close all MCP sessions
+    logger.info("Stopping MCP servers...")
+    await get_mcp_client_manager().stop_all()
+
+    logger.info("Shutting down GRAEM server...")
 
 
 # Create FastAPI application
@@ -142,6 +194,7 @@ app.include_router(google_drive_router)
 app.include_router(agents_router)
 app.include_router(graph_router)
 app.include_router(logs_router)
+app.include_router(viewer_router)
 
 
 # Mount static files

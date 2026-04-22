@@ -77,3 +77,22 @@ credentials.json
 
 # Jupyter
 .ipynb_checkpoints/
+
+# MCP runtime
+mcp_servers/**/__pycache__/
+mcp_servers/**/*.pyc
+config/mcp_servers.local.yaml
+
+# GRAEM input/output data (real documents)
+input/
+output/
+
+# ATEXIS templates (private assets — versionar en repo privado)
+templates/*.dotx
+templates/*.potx
+templates/*.pptx
+templates/*.docx
+
+# Node.js (MCP off-the-shelf servers via npx)
+node_modules/
+package-lock.json

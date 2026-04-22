@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GRAEM — S1000D XML Viewer</title>
+<style>
+  :root {
+    --bg: #1e1e2e;
+    --surface: #313244;
+    --border: #45475a;
+    --text: #cdd6f4;
+    --subtext: #a6adc8;
+    --accent: #89b4fa;
+    --green: #a6e3a1;
+    --yellow: #f9e2af;
+    --red: #f38ba8;
+    --teal: #94e2d5;
+    --mauve: #cba6f7;
+    --overlay: #6c7086;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Header ── */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 1rem; font-weight: 600; color: var(--accent); white-space: nowrap; }
+  header .sep { color: var(--overlay); }
+
+  /* ── DM metadata strip ── */
+  #meta-strip {
+    display: none;
+    flex-wrap: wrap;
+    gap: 8px;
+    flex: 1;
+  }
+  .meta-tag {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 0.75rem;
+    color: var(--subtext);
+  }
+  .meta-tag span { color: var(--text); font-weight: 500; }
+
+  /* ── Toolbar ── */
+  .toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-left: auto;
+  }
+  button {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 4px;
+    padding: 4px 12px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button:hover { background: var(--border); }
+  button.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  button.primary:hover { opacity: 0.85; }
+
+  /* ── File input bar ── */
+  #load-bar {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+  }
+  #load-bar label { color: var(--subtext); white-space: nowrap; }
+  #file-input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 0.85rem;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+  }
+
+  /* ── Main content ── */
+  main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #status {
+    padding: 40px;
+    text-align: center;
+    color: var(--subtext);
+    font-size: 0.95rem;
+  }
+  #xml-container {
+    flex: 1;
+    overflow: auto;
+    padding: 16px 20px;
+    display: none;
+  }
+  pre#xml-output {
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.82rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+    tab-size: 2;
+  }
+
+  /* ── XML syntax highlight classes ── */
+  .xt  { color: var(--overlay); }          /* <?xml ...?> processing instruction */
+  .xc  { color: var(--overlay); }          /* <!-- comment --> */
+  .xtn { color: var(--accent); }           /* tag name */
+  .xan { color: var(--teal); }             /* attribute name */
+  .xav { color: var(--yellow); }           /* attribute value */
+  .xtx { color: var(--text); }             /* text content */
+  .xop { color: var(--mauve); }            /* < > / = punctuation */
+  .xcd { color: var(--green); }            /* CDATA */
+
+  /* ── S1000D section headings ── */
+  .s1000d-section {
+    margin: 4px 0 2px;
+    padding: 2px 6px;
+    border-left: 3px solid var(--accent);
+    color: var(--accent);
+    font-weight: bold;
+  }
+
+  /* ── Line numbers ── */
+  #xml-output .ln { color: var(--overlay); user-select: none; margin-right: 16px; display: inline-block; min-width: 3em; text-align: right; }
+
+  /* ── Error ── */
+  .error { color: var(--red); padding: 20px; }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed; bottom: 20px; right: 20px;
+    background: var(--surface); border: 1px solid var(--green);
+    color: var(--green); padding: 8px 16px; border-radius: 6px;
+    font-size: 0.85rem; display: none; z-index: 1000;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>GRAEM · S1000D XML Viewer</h1>
+  <span class="sep">|</span>
+  <div id="meta-strip"></div>
+  <div class="toolbar">
+    <button onclick="toggleWrap()">Wrap</button>
+    <button onclick="copyXml()">Copy</button>
+    <button class="primary" onclick="downloadXml()" id="btn-dl" style="display:none">Download</button>
+  </div>
+</header>
+
+<div id="load-bar">
+  <label for="file-input">File in output/:</label>
+  <input id="file-input" type="text" placeholder="e.g. dm_hydraulic.xml" />
+  <button onclick="loadFromApi()">Load</button>
+  <label style="margin-left:16px">or drop file:</label>
+  <button onclick="document.getElementById('file-picker').click()">Browse…</button>
+  <input id="file-picker" type="file" accept=".xml,.sgml" style="display:none" onchange="loadFromDisk(this)">
+</div>
+
+<main>
+  <div id="status">
+    Enter a filename from <code>output/</code> and press <strong>Load</strong>,
+    or drop an XML file onto the page.
+  </div>
+  <div id="xml-container">
+    <pre id="xml-output"></pre>
+  </div>
+</main>
+
+<div id="toast">Copied!</div>
+
+<script>
+"use strict";
+
+// ── State ──────────────────────────────────────────────────────────────────
+let _rawXml = "";
+let _filename = "";
+let _wrapped = true;
+
+// ── Auto-load from query params ────────────────────────────────────────────
+window.addEventListener("DOMContentLoaded", () => {
+  const params = new URLSearchParams(location.search);
+
+  // ?file=<name>  →  fetch from /api/viewer/output/<name>
+  const file = params.get("file");
+  if (file) {
+    document.getElementById("file-input").value = file;
+    loadFromApi();
+    return;
+  }
+
+  // ?xml=<base64>  →  inline XML
+  const b64 = params.get("xml");
+  if (b64) {
+    try {
+      const xml = decodeURIComponent(escape(atob(b64)));
+      renderXml(xml, "inline.xml");
+    } catch (e) {
+      showError("Failed to decode inline XML: " + e.message);
+    }
+  }
+});
+
+// ── Drag-and-drop ──────────────────────────────────────────────────────────
+document.addEventListener("dragover", e => { e.preventDefault(); document.body.style.outline = "3px dashed var(--accent)"; });
+document.addEventListener("dragleave", () => { document.body.style.outline = ""; });
+document.addEventListener("drop", e => {
+  e.preventDefault();
+  document.body.style.outline = "";
+  const file = e.dataTransfer.files[0];
+  if (file) readFile(file);
+});
+
+// ── Load from API ──────────────────────────────────────────────────────────
+async function loadFromApi() {
+  const name = document.getElementById("file-input").value.trim();
+  if (!name) return;
+  setStatus("Loading " + name + " …");
+  try {
+    const r = await fetch("/api/viewer/output/" + encodeURIComponent(name));
+    if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
+    const xml = await r.text();
+    renderXml(xml, name);
+  } catch (e) {
+    showError("Load failed: " + e.message);
+  }
+}
+
+// ── Load from disk ─────────────────────────────────────────────────────────
+function loadFromDisk(input) {
+  if (input.files && input.files[0]) readFile(input.files[0]);
+}
+function readFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => renderXml(e.target.result, file.name);
+  reader.readAsText(file, "utf-8");
+}
+
+// ── Render ─────────────────────────────────────────────────────────────────
+function renderXml(xml, filename) {
+  _rawXml = xml;
+  _filename = filename;
+
+  // Update title + download button
+  document.title = "GRAEM · " + filename;
+  document.getElementById("btn-dl").style.display = "";
+
+  // Extract S1000D DM metadata
+  renderMeta(xml);
+
+  // Syntax highlight
+  const pre = document.getElementById("xml-output");
+  const lines = prettyPrint(xml).split("\n");
+  pre.innerHTML = lines.map((ln, i) =>
+    `<span class="ln">${(i+1).toString().padStart(4)}</span>${highlight(ln)}`
+  ).join("\n");
+
+  document.getElementById("status").style.display = "none";
+  const cont = document.getElementById("xml-container");
+  cont.style.display = "block";
+}
+
+function setStatus(msg) {
+  document.getElementById("xml-container").style.display = "none";
+  const s = document.getElementById("status");
+  s.style.display = "";
+  s.textContent = msg;
+}
+
+function showError(msg) {
+  document.getElementById("xml-container").style.display = "none";
+  const s = document.getElementById("status");
+  s.style.display = "";
+  s.innerHTML = `<span class="error">⚠ ${escHtml(msg)}</span>`;
+}
+
+// ── S1000D metadata extraction ─────────────────────────────────────────────
+function renderMeta(xml) {
+  const strip = document.getElementById("meta-strip");
+  strip.innerHTML = "";
+  strip.style.display = "none";
+
+  const metas = [];
+
+  // DM Code
+  const dmCode = extractAttr(xml, "dmCode",
+    ["modelIdentCode","systemDiffCode","systemCode","subSystemCode","subSubSystemCode",
+     "assyCode","disassyCode","disassyCodeVariant","infoCode","infoCodeVariant","itemLocationCode"]);
+  if (dmCode) metas.push(["DM", dmCode]);
+
+  // Issue info
+  const issueNum = extractSingleAttr(xml, "issueInfo", "issueNumber");
+  const inWork   = extractSingleAttr(xml, "issueInfo", "inWork");
+  if (issueNum) metas.push(["Issue", issueNum + (inWork ? "-" + inWork : "")]);
+
+  // Language
+  const lang = extractSingleAttr(xml, "language", "languageIsoCode");
+  const country = extractSingleAttr(xml, "language", "countryIsoCode");
+  if (lang) metas.push(["Lang", lang.toUpperCase() + (country ? "-" + country.toUpperCase() : "")]);
+
+  // Tech name
+  const techName = extractTagText(xml, "techName");
+  if (techName) metas.push(["System", techName]);
+
+  // Info name
+  const infoName = extractTagText(xml, "infoName");
+  if (infoName) metas.push(["Info", infoName]);
+
+  // Security classification
+  const secClass = extractSingleAttr(xml, "security", "securityClassification");
+  if (secClass) metas.push(["Security", secClass === "01" ? "Unclassified" : secClass]);
+
+  if (metas.length) {
+    strip.innerHTML = metas.map(([k, v]) =>
+      `<span class="meta-tag">${escHtml(k)}: <span>${escHtml(v)}</span></span>`
+    ).join("");
+    strip.style.display = "flex";
+  }
+}
+
+function extractAttr(xml, tagName, attrNames) {
+  const re = new RegExp(`<${tagName}([^>]*)>`, "i");
+  const m = xml.match(re);
+  if (!m) return "";
+  return attrNames.map(a => {
+    const av = m[1].match(new RegExp(`${a}="([^"]*)"`, "i"));
+    return av ? av[1] : "";
+  }).filter(Boolean).join("-");
+}
+
+function extractSingleAttr(xml, tagName, attrName) {
+  const re = new RegExp(`<${tagName}[^>]*${attrName}="([^"]*)"`, "i");
+  const m = xml.match(re);
+  return m ? m[1] : "";
+}
+
+function extractTagText(xml, tagName) {
+  const re = new RegExp(`<${tagName}[^>]*>([^<]*)<`, "i");
+  const m = xml.match(re);
+  return m ? m[1].trim() : "";
+}
+
+// ── Pretty-print XML ───────────────────────────────────────────────────────
+function prettyPrint(xml) {
+  // Simple indent-based pretty-printer
+  let out = "";
+  let depth = 0;
+  const indent = "  ";
+  // Normalize line endings
+  xml = xml.replace(/\r\n?/g, "\n").trim();
+
+  const tokenRe = /(<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<[^>]+>|[^<]+)/g;
+  let m;
+  while ((m = tokenRe.exec(xml)) !== null) {
+    const t = m[0].trim();
+    if (!t) continue;
+    if (t.startsWith("</")) {
+      depth = Math.max(0, depth - 1);
+      out += indent.repeat(depth) + t + "\n";
+    } else if (t.startsWith("<?") || t.startsWith("<!--") || t.startsWith("<![CDATA[")) {
+      out += indent.repeat(depth) + t + "\n";
+    } else if (t.startsWith("<") && !t.endsWith("/>")) {
+      out += indent.repeat(depth) + t + "\n";
+      if (!t.match(/<[^>]+\/>/)) depth++;
+    } else if (t.startsWith("<") && t.endsWith("/>")) {
+      out += indent.repeat(depth) + t + "\n";
+    } else {
+      out += indent.repeat(depth) + t + "\n";
+    }
+  }
+  return out;
+}
+
+// ── Syntax highlight ───────────────────────────────────────────────────────
+function highlight(line) {
+  // Processing instruction / XML declaration
+  if (/^\s*<\?/.test(line)) return `<span class="xt">${escHtml(line)}</span>`;
+  // Comment
+  if (/^\s*<!--/.test(line)) return `<span class="xc">${escHtml(line)}</span>`;
+  // CDATA
+  if (/^\s*<!\[CDATA\[/.test(line)) return `<span class="xcd">${escHtml(line)}</span>`;
+  // Closing tag
+  if (/^\s*<\//.test(line)) {
+    return line.replace(/^(\s*)(<\/)([\w:.-]+)(>)(.*)$/, (_, sp, lt, tn, gt, rest) =>
+      escHtml(sp) +
+      `<span class="xop">${escHtml(lt)}</span>` +
+      `<span class="xtn">${escHtml(tn)}</span>` +
+      `<span class="xop">${escHtml(gt)}</span>` +
+      (rest ? `<span class="xtx">${escHtml(rest)}</span>` : "")
+    );
+  }
+  // Opening tag (possibly self-closing)
+  if (/^\s*<[\w:.-]/.test(line)) {
+    return line.replace(
+      /^(\s*)(<)([\w:.-]+)((?:\s+[\w:.-]+="[^"]*")*\s*)(\/?>)(.*)?$/,
+      (_, sp, lt, tn, attrs, gt, rest) => {
+        const hiliteAttrs = attrs.replace(
+          /([\w:.-]+)=("(?:[^"]*)")/g,
+          (__, an, av) =>
+            `<span class="xan">${escHtml(an)}</span><span class="xop">=</span><span class="xav">${escHtml(av)}</span>`
+        );
+        return (
+          escHtml(sp) +
+          `<span class="xop">${escHtml(lt)}</span>` +
+          `<span class="xtn">${escHtml(tn)}</span>` +
+          hiliteAttrs +
+          `<span class="xop">${escHtml(gt)}</span>` +
+          (rest ? `<span class="xtx">${escHtml(rest)}</span>` : "")
+        );
+      }
+    );
+  }
+  // Text node
+  return `<span class="xtx">${escHtml(line)}</span>`;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+// ── Toolbar actions ────────────────────────────────────────────────────────
+function toggleWrap() {
+  _wrapped = !_wrapped;
+  document.getElementById("xml-output").style.whiteSpace = _wrapped ? "pre-wrap" : "pre";
+}
+
+async function copyXml() {
+  if (!_rawXml) return;
+  await navigator.clipboard.writeText(_rawXml);
+  const t = document.getElementById("toast");
+  t.style.display = "block";
+  setTimeout(() => { t.style.display = "none"; }, 1800);
+}
+
+function downloadXml() {
+  if (!_rawXml) return;
+  const a = document.createElement("a");
+  a.href = "data:application/xml;charset=utf-8," + encodeURIComponent(_rawXml);
+  a.download = _filename || "document.xml";
+  a.click();
+}
+</script>
+</body>
+</html>

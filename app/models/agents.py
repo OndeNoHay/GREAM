@@ -38,6 +38,14 @@ class MCPServerConfig(BaseModel):
     # For stdio servers (subprocess)
     command: Optional[str] = Field(default=None, description="Command to run")
     args: list[str] = Field(default_factory=list, description="Command arguments")
+    env: dict[str, str] = Field(
+        default_factory=dict,
+        description="Extra environment variables passed to the subprocess"
+    )
+    timeout_seconds: int = Field(
+        default=30,
+        description="Timeout in seconds for individual tool calls"
+    )
 
     # For HTTP servers
     url: Optional[str] = Field(default=None, description="Server URL")

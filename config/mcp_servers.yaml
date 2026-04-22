@@ -1,0 +1,107 @@
+# config/mcp_servers.yaml
+# Declaración de todos los servidores MCP del proyecto GRAEM.
+#
+# Cada entrada se carga en arranque por MCPClientManager.
+# Cambiar "enabled: true" para activar un servidor.
+#
+# Transporte soportado: stdio únicamente (sin red, confidencialidad absoluta).
+# ------------------------------------------------------------------
+
+servers:
+
+  # ----------------------------------------------------------------
+  # OFF-THE-SHELF — Fase 2
+  # ----------------------------------------------------------------
+
+  - name: filesystem
+    type: stdio
+    # npx descarga automáticamente el paquete si no está en caché local.
+    # allowedDirectories se pasan como argumentos posicionales.
+    command: npx
+    args:
+      - "-y"
+      - "@modelcontextprotocol/server-filesystem"
+      - "C:/AI/GREAM/input"
+      - "C:/AI/GREAM/output"
+    enabled: false    # activar en Fase 2
+    timeout_seconds: 15
+
+  # ----------------------------------------------------------------
+  # CUSTOM Python (FastMCP) — Fase 2+
+  # ----------------------------------------------------------------
+
+  - name: document_loader
+    type: stdio
+    command: python
+    args:
+      - "-m"
+      - "mcp_servers.document_loader.server"
+    enabled: true     # Fase 2 ✓
+    timeout_seconds: 30
+
+  - name: s1000d_csdb
+    type: stdio
+    command: python
+    args:
+      - "-m"
+      - "mcp_servers.s1000d_csdb.server"
+    enabled: true     # Fase 3 ✓
+    timeout_seconds: 30
+
+  # ----------------------------------------------------------------
+  # Playwright — Fase 4
+  # ----------------------------------------------------------------
+
+  - name: playwright
+    type: stdio
+    command: npx
+    args:
+      - "-y"
+      - "@playwright/mcp"
+      - "--headless"
+    enabled: true     # Fase 4 ✓  (headless para CI; cambiar a --headed para demo)
+    timeout_seconds: 60
+
+  # ----------------------------------------------------------------
+  # Office MCPs — Fase 5
+  # ----------------------------------------------------------------
+
+  - name: word_graem
+    type: stdio
+    command: python
+    args:
+      - "-m"
+      - "mcp_servers.word_graem.server"
+    enabled: true     # Fase 5 ✓
+    timeout_seconds: 30
+
+  - name: pptx_graem
+    type: stdio
+    command: python
+    args:
+      - "-m"
+      - "mcp_servers.pptx_graem.server"
+    enabled: true     # Fase 5 ✓
+    timeout_seconds: 30
+
+  # ----------------------------------------------------------------
+  # Validación S1000D — Fase 6
+  # ----------------------------------------------------------------
+
+  - name: brex_validator
+    type: stdio
+    command: python
+    args:
+      - "-m"
+      - "mcp_servers.brex_validator.server"
+    enabled: true     # Fase 6 ✓
+    timeout_seconds: 45
+
+  - name: ste_checker
+    type: stdio
+    command: python
+    args:
+      - "-m"
+      - "mcp_servers.ste_checker.server"
+    enabled: true     # Fase 6 ✓
+    timeout_seconds: 60

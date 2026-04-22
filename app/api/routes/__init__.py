@@ -9,6 +9,7 @@ from app.api.routes.settings import router as settings_router
 from app.api.routes.google_drive import router as google_drive_router
 from app.api.routes.agents import router as agents_router
 from app.api.routes.logs import router as logs_router
+from app.api.routes.viewer import router as viewer_router
 
 __all__ = [
     "documents_router",
@@ -19,4 +20,5 @@ __all__ = [
     "google_drive_router",
     "agents_router",
     "logs_router",
+    "viewer_router",
 ]
