@@ -13,6 +13,7 @@ import pathlib
 from typing import Optional
 
 from fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 from lxml import etree as ET
 
 mcp = FastMCP(name="brex_validator")
@@ -50,7 +51,7 @@ def _parse_xml(content: str) -> tuple[Optional[ET._Element], Optional[str]]:
 # Tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True))
 def check_wellformed(xml_path: str) -> str:
     """
     Verifica si un fichero XML está bien formado (parsing sin errores).
@@ -64,7 +65,7 @@ def check_wellformed(xml_path: str) -> str:
     return json.dumps({"wellformed": parse_err is None, "error": parse_err, "path": xml_path})
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True))
 def validate_against_brex(xml_path: str, brex_path: str) -> str:
     """
     Valida un fichero XML S1000D contra las structureObjectRule de un documento BREX.
@@ -134,7 +135,7 @@ def validate_against_brex(xml_path: str, brex_path: str) -> str:
     })
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True))
 def list_brex_rules(brex_path: str) -> str:
     """
     Extrae y lista las structureObjectRule de un documento BREX S1000D.
@@ -164,7 +165,7 @@ def list_brex_rules(brex_path: str) -> str:
     return json.dumps({"rules": rules, "count": len(rules)})
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True))
 def extract_s1000d_metadata(xml_path: str) -> str:
     """
     Extrae los metadatos S1000D de un data module.

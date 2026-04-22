@@ -11,6 +11,7 @@ import json
 import re
 
 from fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 mcp = FastMCP(name="ste_checker")
 
@@ -171,7 +172,7 @@ def _inflection_lookup(w: str) -> bool:
 # Tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True))
 def check_ste_compliance(text: str, strict_vocabulary: bool = False) -> str:
     """
     Analiza el texto en busca de violaciones STE-100.
@@ -259,7 +260,7 @@ def check_ste_compliance(text: str, strict_vocabulary: bool = False) -> str:
     })
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True))
 def list_approved_vocabulary(category: str = "") -> str:
     """
     Lista el vocabulario STE-100 aprobado.
@@ -280,7 +281,7 @@ def list_approved_vocabulary(category: str = "") -> str:
     return json.dumps({"words": words, "count": len(words), "category": label})
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True))
 def suggest_corrections(text: str) -> str:
     """
     Aplica correcciones STE deterministas (sustitución de palabras no aprobadas)

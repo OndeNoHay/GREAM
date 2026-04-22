@@ -454,3 +454,78 @@ pip freeze | grep -E "^(Jinja2|python-multipart|pypdf)==" >> requirements.txt
 ---
 
 *Report generated from manual code review and CVE database search (NVD, OSV, GitHub Advisory Database, Snyk). CVE data as of 2026-03-30.*
+
+---
+
+## Addendum: MCP Layer Security Assessment — GRAEM Fase 7
+
+> Fecha: 2026-04-22 · Revisado por: JJO + Claude Code
+
+### MCP-01 — Network isolation: todos los MCPs custom sin llamadas de red
+
+| Servidor | Dependencias de red | Estado |
+|---|---|---|
+| `document_loader` | `pypdf` + `python-docx` (local) | ✅ Zero network calls |
+| `s1000d_csdb` | Kùzu + ChromaDB (local, `read_only=True`) | ✅ Zero network calls |
+| `word_graem` | `python-docx` (local) | ✅ Zero network calls |
+| `pptx_graem` | `python-pptx` (local) | ✅ Zero network calls |
+| `brex_validator` | `lxml` + `xmlschema` (local) | ✅ Zero network calls |
+| `ste_checker` | Wordlist embebida, sin LLM externo | ✅ Zero network calls |
+| `@modelcontextprotocol/server-filesystem` | Solo FS local, `allowedDirectories` restringido | ✅ Verificado |
+| `@playwright/mcp` | Solo `file://` + `http://localhost:8000` | ⚠️ `--allowed-origins` pendiente para demo |
+
+Verificación: `grep -r "requests\|httpx\|urllib.request\|boto" mcp_servers/*/server.py` → sin resultados.
+
+ChromaDB: `anonymized_telemetry=False` configurado en `s1000d_csdb/server.py`.
+
+### MCP-02 — Tool annotations read/write
+
+Implementado con `ToolAnnotations` del SDK MCP oficial. Permite a clientes MCP
+mostrar advertencias antes de ejecutar herramientas destructivas.
+
+| Tipo | Anotación | Servidores |
+|---|---|---|
+| Lectura pura | `readOnlyHint=True, idempotentHint=True` | `document_loader`, `s1000d_csdb`, `brex_validator`, `ste_checker`, `list_templates` |
+| Escritura / creación de archivos | `destructiveHint=True` | `word_graem.create_*`, `pptx_graem.create_presentation` |
+
+Tests: `tests/test_mcp_fase7.py::Test*Annotations` verifican programáticamente.
+
+### MCP-03 — Structured audit logging
+
+`MCPClientManager.call_tool()` emite registros JSON en el logger `mcp.audit`:
+
+```json
+{"server": "word_graem", "tool": "create_document",
+ "args_hash": "a3f9b2c14d1e", "duration_ms": 245.1,
+ "status": "ok", "task_id": "task-uuid-123"}
+```
+
+`args_hash` (SHA-256 truncado a 12 hex) permite auditoría sin exponer datos sensibles.
+`task_id` fluye vía `contextvars.ContextVar` desde el agent executor.
+
+### MCP-04 — Sandbox filesystem + viewer path traversal
+
+`app/api/routes/viewer.py` previene path traversal:
+- `Path(filename).name` normaliza a nombre plano
+- Rechaza `..`, `/`, `\` en el nombre
+- Resolución verificada contra `_OUTPUT_DIR` con `startswith()`
+
+`@modelcontextprotocol/server-filesystem` restringe acceso a `input/` y `output/`.
+
+Tests: `tests/test_mcp_fase7.py::TestViewerSandbox`.
+
+### MCP-05 — Auto-restart con backoff exponencial
+
+`MCPClientManager.restart_server()` reintenta con delays 1s → 2s → 4s.
+En `call_tool()`, errores de transporte (`BrokenPipeError`, `EOFError`,
+`anyio.ClosedResourceError`) desencadenan restart + retry automático.
+
+### Controles pendientes (operacionales, no de código)
+
+| Control | Estado |
+|---|---|
+| Firewall saliente bloqueado en demo | ⚠️ Aplicar vía PowerShell antes de demo |
+| Templates ATEXIS en repo privado | ⚠️ Crear `atexis-graem-assets` |
+| `--allowed-origins` en Playwright config | ⚠️ Activar para demo |
+
+*MCP layer assessment completado en Fase 7. CVE data as of 2026-04-22.*

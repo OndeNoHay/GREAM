@@ -3,11 +3,20 @@ MCPClientManager — gestión de conexiones stdio a servidores MCP.
 
 Mantiene un pool de ClientSession (una por servidor) y ofrece
 una interfaz uniforme para llamar herramientas y descubrir el catálogo.
+
+Fase 7 — Hardening:
+  - Structured JSON logging (logger "mcp.audit") por cada tool call
+  - Auto-restart con backoff exponencial en errores de transporte
+  - task_id contextvar para correlacionar llamadas con tareas del agente
 """
 
 import asyncio
+import contextvars
+import hashlib
+import json
 import logging
 import os
+import time
 from typing import Any, Optional
 
 from mcp import ClientSession, StdioServerParameters
@@ -16,17 +25,82 @@ from mcp.client.stdio import stdio_client
 from app.models.agents import MCPServerConfig
 
 logger = logging.getLogger(__name__)
+_audit_logger = logging.getLogger("mcp.audit")
 
+# Context variable: set by the agent executor to correlate MCP calls with tasks.
+# Usage: token = mcp_task_id.set("task-uuid"); ... ; mcp_task_id.reset(token)
+mcp_task_id: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "mcp_task_id", default="—"
+)
+
+# Delays (seconds) between successive restart attempts: 1s → 2s → 4s
+_RESTART_DELAYS = (1.0, 2.0, 4.0)
+
+# Exceptions that indicate the MCP subprocess transport has died
+try:
+    import anyio
+    _TRANSPORT_ERRORS: tuple[type[Exception], ...] = (
+        BrokenPipeError,
+        ConnectionResetError,
+        ConnectionAbortedError,
+        EOFError,
+        anyio.ClosedResourceError,
+        anyio.BrokenResourceError,
+    )
+except (ImportError, AttributeError):
+    _TRANSPORT_ERRORS = (
+        BrokenPipeError,
+        ConnectionResetError,
+        ConnectionAbortedError,
+        EOFError,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Structured audit logging
+# ---------------------------------------------------------------------------
+
+def _log_mcp_call(
+    server: str,
+    tool: str,
+    args: dict[str, Any],
+    duration_ms: float,
+    status: str,
+    error: Optional[str] = None,
+) -> None:
+    """Emite un registro JSON en el logger mcp.audit."""
+    args_hash = hashlib.sha256(
+        json.dumps(args, sort_keys=True, default=str).encode()
+    ).hexdigest()[:12]
+
+    record: dict[str, Any] = {
+        "server": server,
+        "tool": tool,
+        "args_hash": args_hash,
+        "duration_ms": round(duration_ms, 1),
+        "status": status,
+        "task_id": mcp_task_id.get(),
+    }
+    if error:
+        record["error"] = error[:200]  # cap to avoid huge log lines
+
+    _audit_logger.info(json.dumps(record))
+
+
+# ---------------------------------------------------------------------------
+# Manager
+# ---------------------------------------------------------------------------
 
 class MCPClientManager:
     """
     Singleton que gestiona subprocesos stdio MCP.
 
     Ciclo de vida:
-      - start_server(config)  → lanza el subproceso y crea la ClientSession
-      - call_tool(...)        → ejecuta una herramienta en el servidor indicado
-      - list_tools(...)       → descubre las herramientas disponibles
-      - stop_all()            → cierra todas las sesiones (llamado en shutdown)
+      - start_server(config)    → lanza el subproceso y crea la ClientSession
+      - call_tool(...)          → ejecuta una herramienta con logging + auto-restart
+      - list_tools(...)         → descubre las herramientas disponibles
+      - restart_server(name)    → reinicia con backoff exponencial
+      - stop_all()              → cierra todas las sesiones (llamado en shutdown)
     """
 
     _instance: Optional["MCPClientManager"] = None
@@ -115,6 +189,50 @@ class MCPClientManager:
             logger.warning("Error stopping MCP server '%s': %s", name, exc)
 
     # ------------------------------------------------------------------
+    # Auto-restart with exponential backoff
+    # ------------------------------------------------------------------
+
+    async def restart_server(self, name: str) -> bool:
+        """
+        Reinicia un servidor MCP con backoff exponencial.
+
+        Intenta hasta len(_RESTART_DELAYS) veces con delays crecientes.
+        Devuelve True si el servidor arrancó correctamente en algún intento.
+        """
+        config = self._configs.get(name)
+        if not config:
+            logger.warning("No config found for server '%s'; cannot restart", name)
+            return False
+
+        # Tear down dead session without touching _configs yet
+        session = self._sessions.pop(name, None)
+        ctx = self._contexts.pop(name, None)
+        self._configs.pop(name, None)
+        try:
+            if session:
+                await session.__aexit__(None, None, None)
+            if ctx:
+                await ctx.__aexit__(None, None, None)
+        except Exception:
+            pass
+
+        for attempt, delay in enumerate(_RESTART_DELAYS, 1):
+            logger.info(
+                "Restarting MCP server '%s' — attempt %d/%d (wait %.0fs)",
+                name, attempt, len(_RESTART_DELAYS), delay,
+            )
+            await asyncio.sleep(delay)
+            if await self.start_server(config):
+                logger.info("MCP server '%s' restarted successfully", name)
+                return True
+
+        logger.error(
+            "MCP server '%s' could not be restarted after %d attempts",
+            name, len(_RESTART_DELAYS),
+        )
+        return False
+
+    # ------------------------------------------------------------------
     # Tool discovery
     # ------------------------------------------------------------------
 
@@ -154,6 +272,9 @@ class MCPClientManager:
         """
         Ejecuta una herramienta MCP y devuelve el resultado como dict.
 
+        - Emite un registro estructurado JSON en el logger "mcp.audit".
+        - En errores de transporte (subprocess muerto), intenta restart + retry.
+
         El resultado tiene la forma:
           {"content": [{"type": "text", "text": "..."}, ...], "isError": False}
         """
@@ -166,13 +287,9 @@ class MCPClientManager:
 
         config = self._configs.get(server_name)
         timeout = config.timeout_seconds if config else 30
+        t0 = time.monotonic()
 
-        try:
-            result = await asyncio.wait_for(
-                session.call_tool(tool_name, args),
-                timeout=timeout,
-            )
-            # Serializar a dict plano para que el executor pueda manejarlo
+        def _to_dict(result: Any) -> dict[str, Any]:
             return {
                 "content": [
                     {"type": c.type, "text": getattr(c, "text", str(c))}
@@ -180,11 +297,44 @@ class MCPClientManager:
                 ],
                 "isError": result.isError if hasattr(result, "isError") else False,
             }
+
+        try:
+            result = await asyncio.wait_for(
+                self._sessions[server_name].call_tool(tool_name, args),
+                timeout=timeout,
+            )
+            duration_ms = (time.monotonic() - t0) * 1000
+            _log_mcp_call(server_name, tool_name, args, duration_ms, "ok")
+            return _to_dict(result)
+
         except asyncio.TimeoutError:
+            duration_ms = (time.monotonic() - t0) * 1000
+            _log_mcp_call(server_name, tool_name, args, duration_ms, "timeout")
             raise TimeoutError(
                 f"MCP tool '{server_name}.{tool_name}' timed out after {timeout}s"
             )
+
+        except _TRANSPORT_ERRORS as exc:
+            # Subprocess likely died — attempt restart then retry once
+            duration_ms = (time.monotonic() - t0) * 1000
+            _log_mcp_call(server_name, tool_name, args, duration_ms, "transport_error", str(exc))
+            logger.warning(
+                "Transport error on '%s.%s' — attempting restart: %s",
+                server_name, tool_name, exc,
+            )
+            if await self.restart_server(server_name):
+                t1 = time.monotonic()
+                result = await asyncio.wait_for(
+                    self._sessions[server_name].call_tool(tool_name, args),
+                    timeout=timeout,
+                )
+                _log_mcp_call(server_name, tool_name, args, (time.monotonic() - t1) * 1000, "ok_after_restart")
+                return _to_dict(result)
+            raise
+
         except Exception as exc:
+            duration_ms = (time.monotonic() - t0) * 1000
+            _log_mcp_call(server_name, tool_name, args, duration_ms, "error", str(exc))
             logger.error(
                 "call_tool failed: server=%s tool=%s: %s", server_name, tool_name, exc
             )

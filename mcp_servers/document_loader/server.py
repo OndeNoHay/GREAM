@@ -14,6 +14,7 @@ import pathlib
 from typing import Optional
 
 from fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 mcp = FastMCP("document_loader")
 
@@ -45,7 +46,7 @@ def _extract_text(path: pathlib.Path) -> str:
 # MCP tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True))
 def load_document(path: str) -> str:
     """Extract text from a document. Supported formats: PDF, DOCX, TXT, MD."""
     p = pathlib.Path(path)
@@ -68,7 +69,7 @@ def load_document(path: str) -> str:
         return f"Error reading {path}: {exc}"
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True))
 def list_documents(
     directory: str,
     extensions: Optional[list[str]] = None,
@@ -94,7 +95,7 @@ def list_documents(
     return json.dumps(files)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True))
 def get_document_metadata(path: str) -> str:
     """
     Return metadata for a document as JSON.

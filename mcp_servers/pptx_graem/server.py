@@ -11,6 +11,7 @@ import pathlib
 from typing import Optional, Union
 
 from fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 mcp = FastMCP(name="pptx_graem")
 
@@ -102,7 +103,7 @@ def _build_presentation(title: str, slides: list, template_path: Optional[pathli
     return prs
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 def create_presentation(
     output_filename: str,
     title: str,
@@ -153,7 +154,7 @@ def create_presentation(
         return f"Error al crear presentación: {e}"
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True))
 def list_templates() -> str:
     """Lista las plantillas PowerPoint (.potx) disponibles en el directorio templates/."""
     if not _TEMPLATES_DIR.exists():

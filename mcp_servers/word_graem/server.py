@@ -12,6 +12,7 @@ import pathlib
 from typing import Optional
 
 from fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 mcp = FastMCP(name="word_graem")
 
@@ -112,7 +113,7 @@ def _build_document(title: str, content: list, template_path: Optional[pathlib.P
     return doc
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 def create_document(
     output_filename: str,
     title: str,
@@ -158,7 +159,7 @@ def create_document(
         return f"Error al crear documento: {e}"
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 def create_s1000d_changelog(
     output_filename: str,
     changelog_json: str,
@@ -214,7 +215,7 @@ def create_s1000d_changelog(
         return f"Error al crear changelog: {e}"
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True))
 def list_templates() -> str:
     """Lista las plantillas Word (.dotx) disponibles en el directorio templates/."""
     if not _TEMPLATES_DIR.exists():

@@ -20,6 +20,7 @@ import chromadb
 import kuzu
 from chromadb.config import Settings as ChromaSettings
 from fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 logger = logging.getLogger(__name__)
 mcp = FastMCP("s1000d_csdb")
@@ -194,7 +195,7 @@ def _safe_escape(value: str) -> str:
 # Herramientas MCP
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True))
 def list_libraries() -> str:
     """
     List available libraries (datasets) in the GRAEM knowledge base.
@@ -215,7 +216,7 @@ def list_libraries() -> str:
         return json.dumps({"libraries": [], "error": str(exc)})
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True))
 def get_library_stats(library_id: str) -> str:
     """
     Get document chunk, entity, and vector counts for a GRAEM library.
@@ -253,7 +254,7 @@ def get_library_stats(library_id: str) -> str:
     return json.dumps(stats)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True))
 def search_technical_content(
     query: str,
     library_id: str,
@@ -347,7 +348,7 @@ def search_technical_content(
     }, ensure_ascii=False)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True))
 def get_entity_relationships(entity_name: str, library_id: str) -> str:
     """
     Get typed relationships for an entity from the Kùzu knowledge graph.
@@ -447,7 +448,7 @@ def get_entity_relationships(entity_name: str, library_id: str) -> str:
     }, ensure_ascii=False)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True))
 def query_graph(cypher: str, library_id: str) -> str:
     """
     Execute a read-only Cypher MATCH query against the Kùzu knowledge graph.
