@@ -87,6 +87,7 @@ class AgentResponse(BaseModel):
     is_template: bool
     created_at: str
     updated_at: str
+    mcp_servers: list[dict] = []
 
 
 class AgentListResponse(BaseModel):
@@ -131,6 +132,7 @@ def agent_to_response(agent: AgentDefinition) -> AgentResponse:
         is_template=agent.is_template,
         created_at=agent.created_at.isoformat(),
         updated_at=agent.updated_at.isoformat(),
+        mcp_servers=[s.model_dump() for s in agent.mcp_servers],
     )
 
 

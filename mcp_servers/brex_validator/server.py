@@ -25,9 +25,29 @@ _PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent.resolve()
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+def _resolve_path(path_str: str) -> pathlib.Path:
+    """Resolve a path string against known project directories."""
+    p = pathlib.Path(path_str)
+    if p.exists():
+        return p
+    # Try relative to project root
+    candidate = (_PROJECT_ROOT / path_str).resolve()
+    if candidate.exists():
+        return candidate
+    # Try filename only in demo_data/
+    candidate = _PROJECT_ROOT / "demo_data" / p.name
+    if candidate.exists():
+        return candidate
+    # Try filename only in output/
+    candidate = _PROJECT_ROOT / "output" / p.name
+    if candidate.exists():
+        return candidate
+    return p  # Return original; caller will handle not-found
+
+
 def _read_file(path_str: str) -> tuple[Optional[str], Optional[str]]:
     """Returns (content, error)."""
-    p = pathlib.Path(path_str)
+    p = _resolve_path(path_str)
     if not p.exists():
         return None, f"File not found: {path_str}"
     if not p.is_file():

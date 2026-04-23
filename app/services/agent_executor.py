@@ -5,7 +5,9 @@ Executes agent tasks with human-in-the-loop approval using PydanticAI.
 Provides streaming output via async generators for SSE.
 """
 
+import ast
 import asyncio
+import json
 import logging
 from datetime import datetime
 from typing import AsyncIterator, Any, Optional
@@ -42,6 +44,24 @@ class ExecutionContext:
     should_stop: bool = False
     accumulated_sources: list = field(default_factory=list)
     accumulated_entities: list = field(default_factory=list)
+
+
+def _parse_structured_value(raw: str) -> Any:
+    """Deserialize a JSON/Python-literal string to a Python object.
+
+    Tries json.loads first (strict JSON), then ast.literal_eval (handles
+    single-quoted strings and Python list/dict literals). Falls back to the
+    original string if both fail.
+    """
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        pass
+    try:
+        return ast.literal_eval(raw)
+    except (ValueError, SyntaxError):
+        pass
+    return raw
 
 
 class AgentExecutor:
@@ -104,6 +124,7 @@ class AgentExecutor:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": task.prompt},
             ]
+            last_assistant_response: str = ""
 
             # Execution loop
             while context.current_iteration < agent.max_iterations and not context.should_stop:
@@ -132,6 +153,9 @@ class AgentExecutor:
                     logger.error(f"LLM call failed: {e}")
                     yield {"type": "error", "message": f"LLM error: {e}"}
                     break
+
+                if response and response.strip():
+                    last_assistant_response = response
 
                 # Guard against empty responses (OpenAI rejects assistant
                 # messages with no content on the next call)
@@ -318,17 +342,35 @@ class AgentExecutor:
                         })
 
             else:
-                # Max iterations reached
+                # Max iterations reached — surface last response rather than a bare error
                 if not context.should_stop:
-                    yield {
-                        "type": "error",
-                        "message": f"Max iterations ({agent.max_iterations}) reached",
-                    }
-                    manager.update_task_status(
-                        task.id,
-                        TaskStatus.FAILED,
-                        error="Max iterations reached"
-                    )
+                    if last_assistant_response:
+                        manager.update_task_status(
+                            task.id,
+                            TaskStatus.COMPLETED,
+                            result=last_assistant_response
+                        )
+                        yield {
+                            "type": "complete",
+                            "result": last_assistant_response,
+                            "iterations": context.current_iteration,
+                            "sources": context.accumulated_sources,
+                            "entities": context.accumulated_entities,
+                        }
+                    else:
+                        yield {
+                            "type": "error",
+                            "message": f"Max iterations ({agent.max_iterations}) reached without a response",
+                        }
+                        manager.update_task_status(
+                            task.id,
+                            TaskStatus.FAILED,
+                            error="Max iterations reached"
+                        )
+
+        except asyncio.CancelledError:
+            manager.update_task_status(task.id, TaskStatus.CANCELLED)
+            raise  # client disconnected — propagate so uvicorn can clean up
 
         except Exception as e:
             logger.error(f"Agent execution failed: {e}")
@@ -475,6 +517,26 @@ args:
   path: /input/document.pdf
 [/TOOL_CALL]
 
+Example (create Word document — content_json must be compact single-line JSON):
+[TOOL_CALL]
+tool: mcp:word_graem.create_document
+args:
+  output_filename: report.docx
+  title: Hydraulic System Report
+  content_json: [{{"type":"heading","level":1,"text":"Introduction"}},{{"type":"paragraph","text":"Content here."}}]
+[/TOOL_CALL]
+
+Example (create PowerPoint — slides_json must be compact single-line JSON):
+[TOOL_CALL]
+tool: mcp:pptx_graem.create_presentation
+args:
+  output_filename: briefing.pptx
+  title: Hydraulic Briefing
+  slides_json: [{{"layout":"title","title":"Hydraulic Briefing","subtitle":"ATEXIS Group"}},{{"layout":"content","title":"Overview","body":["Point 1","Point 2"]}}]
+[/TOOL_CALL]
+
+CRITICAL: For content_json and slides_json, always write the value as a single-line compact JSON array on the SAME line as the argument name. Never split it across multiple lines and never use separate slide_type/slide_title arguments.
+
 After using tools and gathering information, provide your final answer.
 When you have completed the task, end with "TASK COMPLETE" on its own line.
 """
@@ -494,27 +556,75 @@ When you have completed the task, end with "TASK COMPLETE" on its own line.
             end = response.index("[/TOOL_CALL]")
             block = response[start:end].strip()
 
-            # Parse YAML-like format
+            # Parse YAML-like format, with support for multi-line JSON values
             lines = block.split("\n")
             tool_name = None
-            args = {}
+            args: dict[str, Any] = {}
             in_args = False
+            current_key: Optional[str] = None
+            json_lines: Optional[list[str]] = None
+            json_depth = 0
 
             for line in lines:
-                line = line.strip()
-                if line.startswith("tool:"):
-                    tool_name = line.split(":", 1)[1].strip()
-                elif line == "args:":
+                stripped = line.strip()
+
+                # While collecting a multi-line JSON value, accumulate lines
+                # until the bracket depth returns to zero.
+                if json_lines is not None:
+                    json_lines.append(stripped)
+                    json_depth += stripped.count("{") + stripped.count("[")
+                    json_depth -= stripped.count("}") + stripped.count("]")
+                    if json_depth <= 0:
+                        args[current_key] = "".join(json_lines)
+                        json_lines = None
+                        json_depth = 0
+                    continue
+
+                if stripped.startswith("tool:"):
+                    tool_name = stripped.split(":", 1)[1].strip()
+                elif stripped == "args:":
                     in_args = True
-                elif in_args and ":" in line:
-                    key, value = line.split(":", 1)
+                elif in_args and ":" in stripped:
+                    key, value = stripped.split(":", 1)
                     key = key.strip()
                     value = value.strip()
-                    # Try to parse as int or keep as string
-                    try:
-                        args[key] = int(value)
-                    except ValueError:
-                        args[key] = value
+                    current_key = key
+
+                    if value.startswith("{") or value.startswith("["):
+                        # JSON/list value — may span multiple lines
+                        depth = value.count("{") + value.count("[") - value.count("}") - value.count("]")
+                        if depth <= 0:
+                            args[key] = _parse_structured_value(value)
+                        else:
+                            json_lines = [value]
+                            json_depth = depth
+                    elif value.startswith('"') and len(value) > 2 and value.endswith('"'):
+                        # LLM sometimes wraps JSON arrays/objects in outer quotes.
+                        # Double-decode: strip the outer quotes, then parse inner JSON.
+                        try:
+                            inner = json.loads(value)
+                            if isinstance(inner, str) and (inner.startswith('[') or inner.startswith('{')):
+                                args[key] = _parse_structured_value(inner)
+                            else:
+                                args[key] = inner
+                        except (json.JSONDecodeError, ValueError):
+                            args[key] = value
+                    else:
+                        try:
+                            args[key] = int(value)
+                        except ValueError:
+                            args[key] = value
+
+            # Flush any unclosed JSON collector (safety net)
+            if json_lines is not None and current_key:
+                args[current_key] = _parse_structured_value("".join(json_lines))
+
+            # Normalize legacy "server:tool" → "mcp:server.tool" if LLM omits the prefix
+            if (tool_name and ":" in tool_name
+                    and not tool_name.startswith("mcp:")
+                    and "." not in tool_name.split(":", 1)[0]):
+                parts = tool_name.split(":", 1)
+                tool_name = f"mcp:{parts[0]}.{parts[1]}"
 
             if tool_name:
                 # MCP tools use the "mcp:server.tool" namespace — bypass ToolPermission enum
@@ -547,6 +657,22 @@ When you have completed the task, end with "TASK COMPLETE" on its own line.
             "Here is my final",
             "In conclusion",
             "To summarize my findings",
+            # Common qwen3/LLM completion phrases
+            "successfully created",
+            "has been created",
+            "has been generated",
+            "have been generated",
+            "has been saved",
+            "is now available",
+            "created successfully",
+            "generated successfully",
+            "document is ready",
+            "presentation is ready",
+            "validation complete",
+            "I have analyzed",
+            "I have validated",
+            "Here is the summary",
+            "Here is a summary",
         ]
         return any(indicator in response for indicator in indicators)
 
@@ -572,8 +698,15 @@ When you have completed the task, end with "TASK COMPLETE" on its own line.
             )
 
         manager = get_mcp_client_manager()
+        # Serialize any list/dict values to JSON strings — MCP tools that declare
+        # a parameter as `str` (e.g. content_json, slides_json) will fail FastMCP
+        # validation if we pass a native Python object instead of a JSON string.
+        serialized_args = {
+            k: json.dumps(v, ensure_ascii=False) if isinstance(v, (list, dict)) else v
+            for k, v in tool_args.items()
+        }
         try:
-            result = await manager.call_tool(server_name, tool_name, tool_args)
+            result = await manager.call_tool(server_name, tool_name, serialized_args)
         except TimeoutError as e:
             return f"Error: {e}", None
         except RuntimeError as e:

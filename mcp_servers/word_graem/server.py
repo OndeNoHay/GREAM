@@ -107,6 +107,10 @@ def _build_document(title: str, content: list, template_path: Optional[pathlib.P
                     if i < len(row_cells):
                         row_cells[i].text = str(cell_text)
 
+        elif item_type in ("bullet_list", "list"):
+            for bullet in item.get("items", []):
+                doc.add_paragraph(str(bullet), style="List Bullet")
+
         elif item_type == "pagebreak":
             doc.add_page_break()
 
@@ -123,17 +127,16 @@ def create_document(
     """
     Crea un documento Word (.docx) con estilos ATEXIS.
 
-    content_json es un array JSON con elementos:
-      {"type": "heading", "level": 1, "text": "..."}
-      {"type": "paragraph", "text": "..."}
-      {"type": "table", "headers": [...], "rows": [[...]]}
-      {"type": "pagebreak"}
+    content_json es un array JSON en UNA SOLA LÍNEA con elementos:
+      [{"type":"heading","level":1,"text":"..."},{"type":"paragraph","text":"..."},{"type":"table","headers":["Col1","Col2"],"rows":[["val1","val2"]]},{"type":"pagebreak"}]
 
     template: nombre de fichero .dotx en templates/ (vacío = estilos por defecto).
     Devuelve la ruta absoluta del fichero creado.
     """
     try:
         content = json.loads(content_json) if content_json.strip() else []
+        if isinstance(content, str):
+            content = json.loads(content)
     except json.JSONDecodeError as e:
         return f"Error: content_json inválido — {e}"
 
@@ -154,7 +157,10 @@ def create_document(
         doc = _build_document(title, content, template_path)
         out_path = _ensure_output_dir() / safe_name
         doc.save(str(out_path))
-        return str(out_path)
+        return (
+            f"Document created successfully: **{safe_name}**\n\n"
+            f"Download: [**{safe_name}**](/api/viewer/output/{safe_name})"
+        )
     except Exception as e:
         return f"Error al crear documento: {e}"
 
@@ -216,8 +222,8 @@ def create_s1000d_changelog(
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True))
-def list_templates() -> str:
-    """Lista las plantillas Word (.dotx) disponibles en el directorio templates/."""
+def list_templates(directory: str = "") -> str:
+    """Lista las plantillas Word (.dotx) disponibles en el directorio templates/. El parámetro directory es ignorado."""
     if not _TEMPLATES_DIR.exists():
         return json.dumps({"templates": [], "count": 0})
     templates = [

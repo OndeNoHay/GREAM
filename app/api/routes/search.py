@@ -4,6 +4,7 @@ Search API routes.
 Handles hybrid search (vector + graph) queries with optional LLM response generation.
 """
 
+import asyncio
 import json
 import logging
 from typing import Optional
@@ -721,6 +722,8 @@ async def chat_with_agent(request: AgentChatRequest):
             async for event in executor.run_agent(task, agent):
                 data = json.dumps(event)
                 yield f"data: {data}\n\n"
+        except asyncio.CancelledError:
+            raise  # client disconnect — let uvicorn clean up
         except Exception as e:
             logger.error(f"Agent chat execution error: {e}")
             error_event = json.dumps({"type": "error", "message": str(e)})

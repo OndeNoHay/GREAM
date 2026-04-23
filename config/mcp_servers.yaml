@@ -59,7 +59,7 @@ servers:
       - "-y"
       - "@playwright/mcp"
       - "--headless"
-    enabled: true     # Fase 4 ✓  (headless para CI; cambiar a --headed para demo)
+    enabled: false    # deshabilitado para demo (no requerido por S1000D Co-Author)
     timeout_seconds: 60
 
   # ----------------------------------------------------------------

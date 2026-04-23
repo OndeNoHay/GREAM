@@ -2000,11 +2000,17 @@ function renderAgentsList() {
     const list = document.getElementById('agents-list');
     if (!list) return;
 
-    list.innerHTML = agents.map(agent => `
+    list.innerHTML = agents.map(agent => {
+        const mcpCount = (agent.mcp_servers || []).filter(s => s.enabled).length;
+        const mcpBadge = mcpCount > 0
+            ? `<span class="agent-badge agent-badge-mcp" title="${mcpCount} MCP server${mcpCount !== 1 ? 's' : ''} active">MCP ×${mcpCount}</span>`
+            : '';
+        return `
         <li class="agent-item ${agent.is_template ? 'agent-template' : ''}" data-id="${agent.id}">
             <div class="agent-info">
                 <span class="agent-name">${escapeHtml(agent.name)}</span>
                 ${agent.is_template ? '<span class="agent-badge">Template</span>' : ''}
+                ${mcpBadge}
                 <span class="agent-description">${escapeHtml(agent.description || '')}</span>
             </div>
             <div class="agent-actions">
@@ -2015,8 +2021,8 @@ function renderAgentsList() {
                      <button class="btn btn-sm btn-danger" onclick="deleteAgent('${agent.id}')">Delete</button>`
                 }
             </div>
-        </li>
-    `).join('');
+        </li>`;
+    }).join('');
 }
 
 function populateAgentSelect() {
@@ -2076,6 +2082,26 @@ function showAgentInfo() {
         <div class="param-row"><span>Temperature:</span> <strong>${agent.temperature}</strong></div>
         <div class="param-row"><span>Type:</span> <strong>${agent.is_template ? 'Template' : 'Custom'}</strong></div>
     `;
+
+    // MCP Servers
+    const mcpSection = document.getElementById('agent-info-mcp-section');
+    const mcpList = document.getElementById('agent-info-mcp-list');
+    const mcpServers = agent.mcp_servers || [];
+    if (mcpServers.length > 0) {
+        mcpSection.classList.remove('hidden');
+        mcpList.innerHTML = mcpServers.map(s => {
+            const badge = s.enabled
+                ? '<span class="mcp-badge mcp-enabled">enabled</span>'
+                : '<span class="mcp-badge mcp-disabled">disabled</span>';
+            const cmd = s.command ? `${escapeHtml(s.command)} ${(s.args || []).join(' ')}` : s.url || '';
+            return `<li class="mcp-server-item">
+                <span class="mcp-server-name">${escapeHtml(s.name)}</span>${badge}
+                <span class="mcp-server-cmd">${escapeHtml(cmd)}</span>
+            </li>`;
+        }).join('');
+    } else {
+        mcpSection.classList.add('hidden');
+    }
 
     openModal('agent-info-modal');
 }

@@ -113,10 +113,8 @@ def create_presentation(
     """
     Crea una presentación PowerPoint (.pptx) con estilos ATEXIS.
 
-    slides_json es un array JSON con diapositivas:
-      {"layout": "title",   "title": "...", "subtitle": "..."}
-      {"layout": "content", "title": "...", "body": ["Punto 1", "Punto 2"]}
-      {"layout": "blank",   "title": "..."}
+    slides_json es un array JSON en UNA SOLA LÍNEA con diapositivas:
+      [{"layout":"title","title":"...","subtitle":"..."},{"layout":"content","title":"...","body":["Punto 1","Punto 2"]},{"layout":"blank","title":"..."}]
 
     Si el primer slide no es de tipo "title", se añade automáticamente una
     portada con el título de la presentación.
@@ -126,6 +124,8 @@ def create_presentation(
     """
     try:
         slides = json.loads(slides_json) if slides_json.strip() else []
+        if isinstance(slides, str):
+            slides = json.loads(slides)
     except json.JSONDecodeError as e:
         return f"Error: slides_json inválido — {e}"
 
@@ -149,7 +149,10 @@ def create_presentation(
         prs = _build_presentation(title, slides, template_path)
         out_path = _ensure_output_dir() / safe_name
         prs.save(str(out_path))
-        return str(out_path)
+        return (
+            f"Presentation created successfully: **{safe_name}**\n\n"
+            f"Download: [**{safe_name}**](/api/viewer/output/{safe_name})"
+        )
     except Exception as e:
         return f"Error al crear presentación: {e}"
 

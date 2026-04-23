@@ -48,12 +48,14 @@ APP_DIR = Path(__file__).parent
 _MCP_CONFIG_PATH = Path(__file__).parent.parent / "config" / "mcp_servers.yaml"
 
 
-def _start_mcp_servers() -> None:
+async def _start_mcp_servers() -> None:
     """
-    Carga config/mcp_servers.yaml y arranca en background los servidores habilitados.
+    Carga config/mcp_servers.yaml y arranca los servidores MCP habilitados.
 
-    El arranque es asíncrono (fire-and-forget) para no bloquear el startup de FastAPI.
-    Los servidores estarán disponibles unos segundos después del arranque.
+    Se llama con await desde el lifespan de FastAPI para garantizar que los
+    servidores arrancan en el mismo task de asyncio/anyio. Usar ensure_future
+    o create_task causa un RuntimeError de anyio porque los cancel scopes del
+    SDK de MCP quedan ligados a un task diferente al que los creó.
     """
     if not _MCP_CONFIG_PATH.exists():
         logger.info("No MCP config found at %s — skipping MCP startup", _MCP_CONFIG_PATH)
@@ -73,19 +75,14 @@ def _start_mcp_servers() -> None:
         logger.info("No MCP servers enabled in %s", _MCP_CONFIG_PATH.name)
         return
 
-    import asyncio
-
     mcp_manager = get_mcp_client_manager()
     registry = get_mcp_registry()
 
-    async def _launch_all() -> None:
-        for srv_dict in enabled:
-            config = MCPServerConfig(**srv_dict)
-            await mcp_manager.start_server(config)
-        await registry.refresh()
+    for srv_dict in enabled:
+        config = MCPServerConfig(**srv_dict)
+        await mcp_manager.start_server(config)
 
-    # Schedule in the running event loop (FastAPI's lifespan is already async)
-    asyncio.ensure_future(_launch_all())
+    await registry.refresh()
 
 
 @asynccontextmanager
@@ -117,7 +114,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     get_library_manager()
 
     # Start MCP servers declared in config/mcp_servers.yaml
-    _start_mcp_servers()
+    await _start_mcp_servers()
 
     logger.info("All services initialized successfully!")
     logger.info("Server is ready to accept requests.")

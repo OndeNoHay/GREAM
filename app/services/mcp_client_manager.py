@@ -1,13 +1,18 @@
 """
 MCPClientManager — gestión de conexiones stdio a servidores MCP.
 
-Mantiene un pool de ClientSession (una por servidor) y ofrece
-una interfaz uniforme para llamar herramientas y descubrir el catálogo.
+Arquitectura de tareas:
+  Cada servidor MCP corre como una tarea asyncio de larga vida que posee
+  el contexto stdio_client y ClientSession completo desde el arranque hasta
+  el apagado. Esto garantiza que los cancel scopes de anyio siempre se abren
+  y cierran en la misma tarea, evitando RuntimeError "Attempted to exit cancel
+  scope in a different task".
 
-Fase 7 — Hardening:
-  - Structured JSON logging (logger "mcp.audit") por cada tool call
-  - Auto-restart con backoff exponencial en errores de transporte
-  - task_id contextvar para correlacionar llamadas con tareas del agente
+  start_server()  → lanza la tarea y espera a que la sesión esté lista
+  call_tool()     → envía la llamada desde cualquier tarea; la sesión es segura
+                    cross-task porque asyncio.Future puede ser awaited desde
+                    cualquier tarea
+  stop_all()      → señaliza a todas las tareas para que terminen limpiamente
 """
 
 import asyncio
@@ -16,8 +21,28 @@ import hashlib
 import json
 import logging
 import os
+import pathlib
+import sys
 import time
 from typing import Any, Optional
+
+# Derive the venv Python from the project root (this file is at
+# app/services/mcp_client_manager.py, so project root is 3 levels up).
+# Using sys.executable is unreliable when uvicorn --reload spawns workers via
+# multiprocessing.spawn, which inherits the BASE Python (Python311) rather than
+# the venv Python, causing ImportError for packages only installed in the venv
+# (e.g. python-docx, python-pptx).
+_PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent.resolve()
+_VENV_PYTHON_CANDIDATES = [
+    _PROJECT_ROOT / "venv" / "Scripts" / "python.exe",  # Windows
+    _PROJECT_ROOT / "venv" / "bin" / "python",          # Linux/Mac
+    _PROJECT_ROOT / ".venv" / "Scripts" / "python.exe",
+    _PROJECT_ROOT / ".venv" / "bin" / "python",
+]
+_VENV_PYTHON = next(
+    (str(p) for p in _VENV_PYTHON_CANDIDATES if p.exists()),
+    sys.executable,  # fallback
+)
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -28,32 +53,9 @@ logger = logging.getLogger(__name__)
 _audit_logger = logging.getLogger("mcp.audit")
 
 # Context variable: set by the agent executor to correlate MCP calls with tasks.
-# Usage: token = mcp_task_id.set("task-uuid"); ... ; mcp_task_id.reset(token)
 mcp_task_id: contextvars.ContextVar[str] = contextvars.ContextVar(
     "mcp_task_id", default="—"
 )
-
-# Delays (seconds) between successive restart attempts: 1s → 2s → 4s
-_RESTART_DELAYS = (1.0, 2.0, 4.0)
-
-# Exceptions that indicate the MCP subprocess transport has died
-try:
-    import anyio
-    _TRANSPORT_ERRORS: tuple[type[Exception], ...] = (
-        BrokenPipeError,
-        ConnectionResetError,
-        ConnectionAbortedError,
-        EOFError,
-        anyio.ClosedResourceError,
-        anyio.BrokenResourceError,
-    )
-except (ImportError, AttributeError):
-    _TRANSPORT_ERRORS = (
-        BrokenPipeError,
-        ConnectionResetError,
-        ConnectionAbortedError,
-        EOFError,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -68,11 +70,9 @@ def _log_mcp_call(
     status: str,
     error: Optional[str] = None,
 ) -> None:
-    """Emite un registro JSON en el logger mcp.audit."""
     args_hash = hashlib.sha256(
         json.dumps(args, sort_keys=True, default=str).encode()
     ).hexdigest()[:12]
-
     record: dict[str, Any] = {
         "server": server,
         "tool": tool,
@@ -82,8 +82,7 @@ def _log_mcp_call(
         "task_id": mcp_task_id.get(),
     }
     if error:
-        record["error"] = error[:200]  # cap to avoid huge log lines
-
+        record["error"] = error[:200]
     _audit_logger.info(json.dumps(record))
 
 
@@ -95,12 +94,9 @@ class MCPClientManager:
     """
     Singleton que gestiona subprocesos stdio MCP.
 
-    Ciclo de vida:
-      - start_server(config)    → lanza el subproceso y crea la ClientSession
-      - call_tool(...)          → ejecuta una herramienta con logging + auto-restart
-      - list_tools(...)         → descubre las herramientas disponibles
-      - restart_server(name)    → reinicia con backoff exponencial
-      - stop_all()              → cierra todas las sesiones (llamado en shutdown)
+    Cada servidor corre en su propia tarea asyncio de larga vida que posee
+    el contexto stdio_client y ClientSession. Las llamadas a call_tool()
+    pueden venir de cualquier tarea — asyncio.Future es cross-task safe.
     """
 
     _instance: Optional["MCPClientManager"] = None
@@ -108,9 +104,14 @@ class MCPClientManager:
     def __new__(cls) -> "MCPClientManager":
         if cls._instance is None:
             cls._instance = super().__new__(cls)
+            # Active ClientSession objects, keyed by server name
             cls._instance._sessions: dict[str, ClientSession] = {}
-            cls._instance._contexts: dict[str, Any] = {}
+            # Config for each running server (needed for timeout in call_tool)
             cls._instance._configs: dict[str, MCPServerConfig] = {}
+            # Long-lived asyncio tasks, one per server
+            cls._instance._server_tasks: dict[str, asyncio.Task] = {}
+            # Stop events — set() triggers graceful shutdown of the server task
+            cls._instance._stop_events: dict[str, asyncio.Event] = {}
         return cls._instance
 
     # ------------------------------------------------------------------
@@ -119,129 +120,132 @@ class MCPClientManager:
 
     async def start_server(self, config: MCPServerConfig) -> bool:
         """
-        Lanza el subproceso stdio y negocia la sesión MCP.
+        Lanza una tarea de larga vida para el servidor MCP y espera a que
+        la sesión esté lista para recibir llamadas.
 
-        Devuelve True si el servidor arrancó correctamente.
+        La tarea mantiene el contexto stdio_client y ClientSession abierto
+        hasta que se llame a stop_all().
         """
         if not config.enabled:
             logger.debug("MCP server %s is disabled, skipping", config.name)
             return False
-
         if config.type != "stdio":
             logger.warning("Only stdio MCP servers are supported; skipping %s", config.name)
             return False
-
         if config.name in self._sessions:
             logger.debug("MCP server %s already running", config.name)
             return True
-
         if not config.command:
             logger.error("MCP server %s has no command configured", config.name)
             return False
 
+        # Resolve bare "python"/"python3" to the venv interpreter
+        cmd = config.command
+        if cmd in ("python", "python3"):
+            cmd = _VENV_PYTHON
+
         env = {**os.environ, **config.env} if config.env else None
+        params = StdioServerParameters(command=cmd, args=config.args, env=env)
+        timeout_s = config.timeout_seconds or 30
 
-        params = StdioServerParameters(
-            command=config.command,
-            args=config.args,
-            env=env,
-        )
+        # Coordination events
+        ready_event: asyncio.Event = asyncio.Event()
+        stop_event: asyncio.Event = asyncio.Event()
+        error_holder: list[Exception] = []
 
+        async def _run_server() -> None:
+            """
+            Tarea de larga vida que posee el ciclo completo del servidor MCP.
+
+            El contexto stdio_client y la ClientSession se abren y cierran
+            dentro de esta misma tarea, por lo que los cancel scopes de anyio
+            nunca cruzan tareas.
+            """
+            try:
+                async with stdio_client(params) as (read, write):
+                    async with ClientSession(read, write) as sess:
+                        await sess.initialize()
+                        tools_result = await sess.list_tools()
+                        tool_names = [t.name for t in tools_result.tools]
+
+                        # Register session — visible to call_tool() immediately
+                        self._sessions[config.name] = sess
+                        self._configs[config.name] = config
+
+                        logger.info(
+                            "MCP server '%s' started — %d tools: %s",
+                            config.name, len(tool_names), tool_names,
+                        )
+                        ready_event.set()
+
+                        # Keep the session alive until stop is requested
+                        await stop_event.wait()
+
+            except asyncio.CancelledError:
+                logger.info("MCP server '%s' task cancelled", config.name)
+                raise
+            except Exception as exc:
+                logger.error("MCP server '%s' error: %s", config.name, exc)
+                error_holder.append(exc)
+                ready_event.set()  # Unblock waiter even on failure
+            finally:
+                # Always clean up — whether normal exit or error
+                self._sessions.pop(config.name, None)
+                self._configs.pop(config.name, None)
+                self._server_tasks.pop(config.name, None)
+                self._stop_events.pop(config.name, None)
+
+        task = asyncio.create_task(_run_server(), name=f"mcp-{config.name}")
+        self._server_tasks[config.name] = task
+        self._stop_events[config.name] = stop_event
+
+        # Wait for the server to signal it is ready (or fail)
         try:
-            ctx = stdio_client(params)
-            read_stream, write_stream = await ctx.__aenter__()
-            session = ClientSession(read_stream, write_stream)
-            await session.__aenter__()
-            await session.initialize()
-
-            self._sessions[config.name] = session
-            self._contexts[config.name] = ctx
-            self._configs[config.name] = config
-
-            tools = await session.list_tools()
-            tool_names = [t.name for t in tools.tools]
-            logger.info(
-                "MCP server '%s' started — %d tools: %s",
-                config.name, len(tool_names), tool_names,
+            await asyncio.wait_for(ready_event.wait(), timeout=timeout_s)
+        except asyncio.TimeoutError:
+            logger.error(
+                "MCP server '%s' startup timed out after %ss — stopping",
+                config.name, timeout_s,
             )
-            return True
-
-        except Exception as exc:
-            logger.error("Failed to start MCP server '%s': %s", config.name, exc)
+            stop_event.set()
+            task.cancel()
             return False
+
+        if error_holder:
+            logger.error(
+                "MCP server '%s' failed to start: %s", config.name, error_holder[0]
+            )
+            return False
+
+        return True
 
     async def stop_all(self) -> None:
-        """Cierra todas las sesiones MCP activas."""
-        for name in list(self._sessions.keys()):
-            await self._stop_server(name)
+        """Signal all server tasks to stop and wait for clean exit."""
+        names = list(self._stop_events.keys())
+        for name in names:
+            ev = self._stop_events.get(name)
+            if ev:
+                ev.set()
+
+        tasks = [t for t in self._server_tasks.values() if not t.done()]
+        if tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=10.0,
+                )
+            except asyncio.TimeoutError:
+                for t in tasks:
+                    if not t.done():
+                        t.cancel()
+
         logger.info("All MCP servers stopped")
-
-    async def _stop_server(self, name: str) -> None:
-        session = self._sessions.pop(name, None)
-        ctx = self._contexts.pop(name, None)
-        self._configs.pop(name, None)
-        try:
-            if session:
-                await session.__aexit__(None, None, None)
-            if ctx:
-                await ctx.__aexit__(None, None, None)
-        except Exception as exc:
-            logger.warning("Error stopping MCP server '%s': %s", name, exc)
-
-    # ------------------------------------------------------------------
-    # Auto-restart with exponential backoff
-    # ------------------------------------------------------------------
-
-    async def restart_server(self, name: str) -> bool:
-        """
-        Reinicia un servidor MCP con backoff exponencial.
-
-        Intenta hasta len(_RESTART_DELAYS) veces con delays crecientes.
-        Devuelve True si el servidor arrancó correctamente en algún intento.
-        """
-        config = self._configs.get(name)
-        if not config:
-            logger.warning("No config found for server '%s'; cannot restart", name)
-            return False
-
-        # Tear down dead session without touching _configs yet
-        session = self._sessions.pop(name, None)
-        ctx = self._contexts.pop(name, None)
-        self._configs.pop(name, None)
-        try:
-            if session:
-                await session.__aexit__(None, None, None)
-            if ctx:
-                await ctx.__aexit__(None, None, None)
-        except Exception:
-            pass
-
-        for attempt, delay in enumerate(_RESTART_DELAYS, 1):
-            logger.info(
-                "Restarting MCP server '%s' — attempt %d/%d (wait %.0fs)",
-                name, attempt, len(_RESTART_DELAYS), delay,
-            )
-            await asyncio.sleep(delay)
-            if await self.start_server(config):
-                logger.info("MCP server '%s' restarted successfully", name)
-                return True
-
-        logger.error(
-            "MCP server '%s' could not be restarted after %d attempts",
-            name, len(_RESTART_DELAYS),
-        )
-        return False
 
     # ------------------------------------------------------------------
     # Tool discovery
     # ------------------------------------------------------------------
 
     async def list_tools(self, server_name: str) -> list[Any]:
-        """
-        Devuelve la lista de Tool objects del servidor indicado.
-
-        Retorna lista vacía si el servidor no está disponible.
-        """
         session = self._sessions.get(server_name)
         if not session:
             return []
@@ -253,7 +257,6 @@ class MCPClientManager:
             return []
 
     async def list_all_tools(self) -> dict[str, list[Any]]:
-        """Devuelve el catálogo completo {server_name: [Tool, ...]}."""
         catalog: dict[str, list[Any]] = {}
         for name in list(self._sessions.keys()):
             catalog[name] = await self.list_tools(name)
@@ -270,13 +273,11 @@ class MCPClientManager:
         args: dict[str, Any],
     ) -> dict[str, Any]:
         """
-        Ejecuta una herramienta MCP y devuelve el resultado como dict.
+        Ejecuta una herramienta MCP desde cualquier tarea asyncio.
 
-        - Emite un registro estructurado JSON en el logger "mcp.audit".
-        - En errores de transporte (subprocess muerto), intenta restart + retry.
-
-        El resultado tiene la forma:
-          {"content": [{"type": "text", "text": "..."}, ...], "isError": False}
+        La sesión es safe cross-task: la escritura va al stream del
+        subproceso y la respuesta llega vía asyncio.Future que puede
+        ser awaited desde cualquier tarea.
         """
         session = self._sessions.get(server_name)
         if not session:
@@ -300,7 +301,7 @@ class MCPClientManager:
 
         try:
             result = await asyncio.wait_for(
-                self._sessions[server_name].call_tool(tool_name, args),
+                session.call_tool(tool_name, args),
                 timeout=timeout,
             )
             duration_ms = (time.monotonic() - t0) * 1000
@@ -313,24 +314,6 @@ class MCPClientManager:
             raise TimeoutError(
                 f"MCP tool '{server_name}.{tool_name}' timed out after {timeout}s"
             )
-
-        except _TRANSPORT_ERRORS as exc:
-            # Subprocess likely died — attempt restart then retry once
-            duration_ms = (time.monotonic() - t0) * 1000
-            _log_mcp_call(server_name, tool_name, args, duration_ms, "transport_error", str(exc))
-            logger.warning(
-                "Transport error on '%s.%s' — attempting restart: %s",
-                server_name, tool_name, exc,
-            )
-            if await self.restart_server(server_name):
-                t1 = time.monotonic()
-                result = await asyncio.wait_for(
-                    self._sessions[server_name].call_tool(tool_name, args),
-                    timeout=timeout,
-                )
-                _log_mcp_call(server_name, tool_name, args, (time.monotonic() - t1) * 1000, "ok_after_restart")
-                return _to_dict(result)
-            raise
 
         except Exception as exc:
             duration_ms = (time.monotonic() - t0) * 1000
@@ -346,7 +329,6 @@ class MCPClientManager:
 
     @property
     def running_servers(self) -> list[str]:
-        """Nombres de los servidores MCP activos."""
         return list(self._sessions.keys())
 
     def is_running(self, server_name: str) -> bool:
@@ -357,7 +339,6 @@ _manager: Optional[MCPClientManager] = None
 
 
 def get_mcp_client_manager() -> MCPClientManager:
-    """Devuelve el singleton MCPClientManager."""
     global _manager
     if _manager is None:
         _manager = MCPClientManager()

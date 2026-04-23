@@ -114,8 +114,15 @@ class MCPRegistry:
             for tool in tools:
                 full_name = self.make_mcp_tool_name(server_name, tool.name)
                 description = tool.description or "(sin descripción)"
-                # Una sola línea concisa para no consumir contexto innecesario
-                lines.append(f"- {full_name}: {description}")
+                # Include parameter names from inputSchema so the LLM knows
+                # exactly which kwargs to use instead of inventing them.
+                params_str = ""
+                schema = getattr(tool, "inputSchema", None)
+                if isinstance(schema, dict):
+                    props = schema.get("properties", {})
+                    if props:
+                        params_str = f"({', '.join(props.keys())})"
+                lines.append(f"- {full_name}{params_str}: {description}")
 
         return lines
 
