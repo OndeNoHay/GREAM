@@ -131,36 +131,51 @@ async def _process_with_progress(
     total_chunks = len(chunk_texts)
     logger.info(f"[{source_file}] Starting ingestion — {total_chunks} chunks")
 
-    # Phase 1: Generate embeddings with progress
+    # Phase 1: Generate embeddings concurrently with progress
+    # Up to MAX_CONCURRENT_EMBED_BATCHES batches run in parallel via asyncio.to_thread.
+    # Each batch call is I/O-bound (network to Ollama/OpenAI) so the GIL is released
+    # and true concurrency is achieved even without multiprocessing.
     batch_size = 10
+    MAX_CONCURRENT_EMBED_BATCHES = 5
     all_embeddings = []
     total_batches = (total_chunks + batch_size - 1) // batch_size
+    all_batches = [
+        chunk_texts[i * batch_size: min((i + 1) * batch_size, total_chunks)]
+        for i in range(total_batches)
+    ]
 
     yield _send_progress("embedding", 0, total_chunks, "Starting embeddings...")
-    logger.info(f"[{source_file}] Phase 1/3: Embedding ({total_batches} batches of up to {batch_size})")
+    logger.info(
+        f"[{source_file}] Phase 1/3: Embedding ({total_batches} batches, "
+        f"up to {MAX_CONCURRENT_EMBED_BATCHES} concurrent)"
+    )
+
+    embed_semaphore = asyncio.Semaphore(MAX_CONCURRENT_EMBED_BATCHES)
+    _embed_model = settings_mgr.ai_settings.embedding_model
+    _embed_client = ai_client._get_client()
+
+    async def _embed_one_batch(batch_texts: list) -> list:
+        async with embed_semaphore:
+            resp = await asyncio.to_thread(
+                _embed_client.embeddings.create,
+                model=_embed_model,
+                input=batch_texts,
+            )
+            return sorted(resp.data, key=lambda x: x.index)
 
     try:
-        for batch_num in range(total_batches):
-            start_idx = batch_num * batch_size
-            end_idx = min(start_idx + batch_size, total_chunks)
-            batch_texts = chunk_texts[start_idx:end_idx]
-
-            # Generate embeddings for batch
-            response = ai_client._get_client().embeddings.create(
-                model=settings_mgr.ai_settings.embedding_model,
-                input=batch_texts
-            )
-            sorted_data = sorted(response.data, key=lambda x: x.index)
-            batch_embeddings = [item.embedding for item in sorted_data]
-            all_embeddings.extend(batch_embeddings)
-
-            # Send progress
-            progress = min(end_idx, total_chunks)
+        # Process batches in concurrent groups; report progress after each group
+        # so the UI receives updates while batches are in flight.
+        group_size = MAX_CONCURRENT_EMBED_BATCHES
+        for group_start in range(0, len(all_batches), group_size):
+            group = all_batches[group_start:group_start + group_size]
+            group_results = await asyncio.gather(*[_embed_one_batch(b) for b in group])
+            for batch_data in group_results:
+                all_embeddings.extend(item.embedding for item in batch_data)
+            progress = min(len(all_embeddings), total_chunks)
             yield _send_progress("embedding", progress, total_chunks,
-                               f"Embedded {progress}/{total_chunks} chunks")
+                                 f"Embedded {progress}/{total_chunks} chunks")
             logger.info(f"[{source_file}] Embedding: {progress}/{total_chunks} chunks")
-
-            # Small delay to allow UI updates
             await asyncio.sleep(0.01)
 
     except Exception as e:
@@ -225,58 +240,80 @@ async def _process_with_progress(
             for data in chunk_data
         ]
 
-        # Process graph one chunk at a time for granular progress.
-        # Each call runs in a thread so the event loop stays free to flush SSE events.
-        # RateLimitWait exceptions trigger a configurable cooldown before retry (max 3 attempts).
+        # Process ALL chunks in a single ingest_document call.
+        # Previously this loop called ingest_document one chunk at a time, which caused
+        # a full DB checkpoint + reconnect for every chunk (~500 reconnects on a 160-page PDF).
+        # Passing all chunks at once means one reconnect, one batch write, and parallel
+        # regex extraction inside ingest_document (via ThreadPoolExecutor).
+        #
+        # Because the call can take minutes (Kùzu I/O for thousands of writes), we run
+        # it as an asyncio Task and poll every HEARTBEAT_S seconds to emit SSE keepalive
+        # events — without these the browser drops the SSE connection after ~30-60s of
+        # silence and the progress bar freezes at 0.
+        #
+        # RateLimitWait can still occur in LLM extraction mode; retry logic is preserved.
         MAX_RATE_LIMIT_RETRIES = 3
-        for chunk_num, chunk in enumerate(graph_chunks):
-            yield _send_progress(
-                "graph", chunk_num, total_chunks,
-                f"Graph: chunk {chunk_num + 1}/{total_chunks} — {graph_nodes} entities so far"
-            )
-            logger.info(f"[{source_file}] Graph: chunk {chunk_num + 1}/{total_chunks}")
-            await asyncio.sleep(0)  # flush progress event to client before blocking
+        HEARTBEAT_S = 15  # seconds between SSE keepalive events
+        retries = 0
+        logger.info(f"[{source_file}] Graph: processing {total_chunks} chunks in single batch")
+        await asyncio.sleep(0)  # flush progress event to client before entering thread
 
-            retries = 0
-            while True:
+        while True:
+            graph_task = asyncio.create_task(
+                asyncio.to_thread(
+                    graph_db.ingest_document,
+                    library_id=library_id,
+                    source_file=source_file,
+                    chunks=graph_chunks,
+                )
+            )
+            elapsed_s = 0
+
+            # Heartbeat loop: wait up to HEARTBEAT_S at a time; send a keepalive event
+            # on each timeout so the SSE connection stays open.  asyncio.shield() prevents
+            # the task from being cancelled when wait_for's timeout fires.
+            # Non-timeout exceptions (e.g. RateLimitWait) are caught generically so they
+            # fall through to graph_task.result() below for proper handling.
+            while not graph_task.done():
                 try:
-                    nodes, rels = await asyncio.to_thread(
-                        graph_db.ingest_document,
-                        library_id=library_id,
-                        source_file=source_file,
-                        chunks=[chunk],
+                    await asyncio.wait_for(asyncio.shield(graph_task), timeout=HEARTBEAT_S)
+                except asyncio.TimeoutError:
+                    elapsed_s += HEARTBEAT_S
+                    yield _send_progress(
+                        "graph", 0, total_chunks,
+                        f"Graph extraction in progress... {elapsed_s}s — {total_chunks} chunks"
                     )
-                    graph_nodes += nodes
-                    graph_relationships += rels
-                    break  # success — move to next chunk
-                except RateLimitWait as e:
-                    retries += 1
-                    if retries > MAX_RATE_LIMIT_RETRIES:
-                        logger.error(
-                            f"[{source_file}] Rate limit: max retries ({MAX_RATE_LIMIT_RETRIES}) "
-                            f"exceeded at chunk {chunk_num + 1}"
-                        )
-                        yield _send_progress(
-                            "error", chunk_num, total_chunks,
-                            f"Rate limit exceeded max retries at chunk {chunk_num + 1}/{total_chunks}"
-                        )
-                        return
-                    wait_secs = e.wait_seconds
-                    logger.warning(
-                        f"[{source_file}] Rate limit on chunk {chunk_num + 1}, "
-                        f"waiting {wait_secs}s (attempt {retries}/{MAX_RATE_LIMIT_RETRIES})"
+                    await asyncio.sleep(0)
+                except Exception:
+                    break  # task completed with an exception; handled by graph_task.result()
+
+            # Retrieve result or exception from the completed task
+            try:
+                graph_nodes, graph_relationships = graph_task.result()
+                break  # success
+            except RateLimitWait as e:
+                retries += 1
+                if retries > MAX_RATE_LIMIT_RETRIES:
+                    logger.error(
+                        f"[{source_file}] Rate limit: max retries ({MAX_RATE_LIMIT_RETRIES}) exceeded"
                     )
                     yield _send_progress(
-                        "graph", chunk_num, total_chunks,
-                        f"Rate limit hit — waiting {wait_secs}s before retry "
-                        f"(chunk {chunk_num + 1}/{total_chunks}, attempt {retries}/{MAX_RATE_LIMIT_RETRIES})"
+                        "error", 0, total_chunks,
+                        f"Rate limit exceeded max retries for graph extraction"
                     )
-                    await asyncio.sleep(wait_secs)
-
-            yield _send_progress(
-                "graph", chunk_num + 1, total_chunks,
-                f"Graph: {chunk_num + 1}/{total_chunks} chunks — {graph_nodes} entities, {graph_relationships} relations"
-            )
+                    return
+                wait_secs = e.wait_seconds
+                logger.warning(
+                    f"[{source_file}] Rate limit on graph extraction, "
+                    f"waiting {wait_secs}s (attempt {retries}/{MAX_RATE_LIMIT_RETRIES})"
+                )
+                yield _send_progress(
+                    "graph", 0, total_chunks,
+                    f"Rate limit hit — waiting {wait_secs}s before retry "
+                    f"(attempt {retries}/{MAX_RATE_LIMIT_RETRIES})"
+                )
+                await asyncio.sleep(wait_secs)
+                # Loop will create a new task for the retry
 
         logger.info(f"[{source_file}] Graph done: {graph_nodes} entities, {graph_relationships} relations")
         yield _send_progress("graph", total_chunks, total_chunks,

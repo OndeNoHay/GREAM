@@ -120,7 +120,20 @@
       "PowerShell(C:\\\\AI\\\\GREAM\\\\venv\\\\Scripts\\\\python.exe -c \"import urllib; print\\('urllib ok'\\)\" 2>$null)",
       "PowerShell(Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -match \"uvicorn\" } | Select-Object ProcessId, CommandLine | Format-Table -AutoSize -Wrap)",
       "PowerShell(netstat -ano)",
-      "PowerShell(Get-WmiObject Win32_Process | Where-Object { $_.ProcessId -in @\\(2104, 22608\\) } | Select-Object ProcessId, CommandLine | Format-Table -Wrap -AutoSize)"
+      "PowerShell(Get-WmiObject Win32_Process | Where-Object { $_.ProcessId -in @\\(2104, 22608\\) } | Select-Object ProcessId, CommandLine | Format-Table -Wrap -AutoSize)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app/api/routes/documents.py'\\).read\\(\\)\\); print\\('documents.py: OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app/services/graph_db.py'\\).read\\(\\)\\); print\\('graph_db.py: OK'\\)\")",
+      "Bash(python -c \"import concurrent.futures, os; print\\('stdlib imports OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app/api/routes/documents.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python -c \"import kuzu; help\\(kuzu.Connection.execute\\)\")",
+      "Bash(python -c \"import kuzu; print\\(kuzu.__version__\\)\")",
+      "Bash(venv/Scripts/python -c \"import kuzu; print\\(kuzu.__version__\\)\")",
+      "Bash(venv/Scripts/pip show *)",
+      "Bash(./venv/Scripts/python.exe -c \"import kuzu; print\\(kuzu.__version__\\)\")",
+      "Bash(./venv/Scripts/python.exe -c ' *)",
+      "PowerShell(Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -match \"uvicorn\" -and $_.CommandLine -notmatch \"powershell\" } | Select-Object ProcessId, CommandLine | Format-Table -Wrap -AutoSize)",
+      "PowerShell(Invoke-RestMethod -Uri \"http://localhost:8000/api/mcp/servers\" -Method GET)",
+      "PowerShell(Invoke-RestMethod -Uri \"http://localhost:8000/api/mcp/servers/word_graem/restart\" -Method POST)"
     ]
   }
 }

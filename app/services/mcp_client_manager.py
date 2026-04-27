@@ -219,6 +219,25 @@ class MCPClientManager:
 
         return True
 
+    async def stop_server(self, server_name: str) -> None:
+        """Stop a single MCP server gracefully."""
+        ev = self._stop_events.get(server_name)
+        if ev:
+            ev.set()
+        task = self._server_tasks.get(server_name)
+        if task and not task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
+            except asyncio.TimeoutError:
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
+            except asyncio.CancelledError:
+                pass
+        logger.info("MCP server '%s' stopped", server_name)
+
     async def stop_all(self) -> None:
         """Signal all server tasks to stop and wait for clean exit."""
         names = list(self._stop_events.keys())

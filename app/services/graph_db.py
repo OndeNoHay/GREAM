@@ -14,9 +14,11 @@ Redesigned with:
 - Pattern-based relationship extraction for semantic relationships
 """
 
+import concurrent.futures
 import gc
 import json
 import logging
+import os
 import re
 import uuid
 from datetime import datetime
@@ -965,44 +967,68 @@ Important:
         llm_success_count = 0
         llm_fallback_count = 0
 
-        for i, chunk in enumerate(chunks):
-            chunk_id = chunk.get("chunk_id", f"chunk_{uuid.uuid4().hex[:8]}")
-            page = chunk.get("page")
-            chunk_index = chunk.get("chunk_index", 0)
-            text = chunk.get("text", "")
+        if use_llm:
+            # LLM extraction remains sequential — rate-limited API calls cannot be parallelised
+            for i, chunk in enumerate(chunks):
+                chunk_id = chunk.get("chunk_id", f"chunk_{uuid.uuid4().hex[:8]}")
+                page = chunk.get("page")
+                chunk_index = chunk.get("chunk_index", 0)
+                text = chunk.get("text", "")
 
-            document_nodes.append({
-                "chunk_id": chunk_id,
-                "page": str(page) if page else "",
-                "chunk_index": str(chunk_index),
-                "text": text,
-            })
+                document_nodes.append({
+                    "chunk_id": chunk_id,
+                    "page": str(page) if page else "",
+                    "chunk_index": str(chunk_index),
+                    "text": text,
+                })
 
-            # Phase 1: Extract entities and relationships
-            if use_llm:
-                # LLM extraction: single call for both entities and relationships
                 entities, relationships, llm_used = self._extract_with_llm_tracking(text)
                 if llm_used:
                     llm_success_count += 1
                 else:
                     llm_fallback_count += 1
-            else:
-                # Regex extraction: separate calls
+
+                cooccurrences = self.extract_cooccurrences(text, entities)
+                relationships.extend(cooccurrences)
+
+                all_chunk_entities[chunk_id] = entities
+                all_chunk_relationships[chunk_id] = relationships
+                total_entities_found += len(entities)
+                total_relationships_found += len(relationships)
+
+                if (i + 1) % 5 == 0:
+                    logger.info(f"LLM extraction progress: {i + 1}/{len(chunks)} chunks processed")
+        else:
+            # Regex extraction is stateless and thread-safe — run all chunks in parallel.
+            # ThreadPoolExecutor releases the GIL between regex operations so multiple
+            # chunks are processed simultaneously on multi-core machines.
+            _num_workers = min(8, max(1, os.cpu_count() or 4))
+
+            def _extract_regex_chunk(chunk: dict) -> tuple:
+                cid = chunk.get("chunk_id", f"chunk_{uuid.uuid4().hex[:8]}")
+                page = chunk.get("page")
+                idx = chunk.get("chunk_index", 0)
+                text = chunk.get("text", "")
                 entities = self.extract_entities(text)
                 relationships = self.extract_relationships(text, entities)
+                cooccurrences = self.extract_cooccurrences(text, entities)
+                relationships.extend(cooccurrences)
+                return cid, page, idx, text, entities, relationships
 
-            # Add co-occurrence relationships (always use fast regex)
-            cooccurrences = self.extract_cooccurrences(text, entities)
-            relationships.extend(cooccurrences)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=_num_workers) as _pool:
+                _extracted = list(_pool.map(_extract_regex_chunk, chunks))
 
-            all_chunk_entities[chunk_id] = entities
-            all_chunk_relationships[chunk_id] = relationships
-            total_entities_found += len(entities)
-            total_relationships_found += len(relationships)
-
-            # Log progress every 5 chunks for LLM mode
-            if use_llm and (i + 1) % 5 == 0:
-                logger.info(f"LLM extraction progress: {i + 1}/{len(chunks)} chunks processed")
+            for cid, page, idx, text, entities, relationships in _extracted:
+                document_nodes.append({
+                    "chunk_id": cid,
+                    "page": str(page) if page else "",
+                    "chunk_index": str(idx),
+                    "text": text,
+                })
+                all_chunk_entities[cid] = entities
+                all_chunk_relationships[cid] = relationships
+                total_entities_found += len(entities)
+                total_relationships_found += len(relationships)
 
         # Log LLM usage summary
         if use_llm:
@@ -1023,30 +1049,33 @@ Important:
         logger.info("Refreshing database connection before batch write (frees buffer pool)...")
         self._reconnect_connection()
 
-        # Phase 2a: Batch create document nodes
-        # Process in batches to avoid buffer exhaustion
-        BATCH_SIZE = 50  # Commit every 50 operations to free buffer memory
-        safe_source = self._escape_string(source_file)
         safe_library = self._escape_string(library_id)
+        safe_source = self._escape_string(source_file)
 
-        for i, doc in enumerate(document_nodes):
-            query = (
-                f"CREATE (d:Document {{"
-                f"id: '{self._escape_string(doc['chunk_id'])}', "
-                f"library_id: '{safe_library}', "
-                f"source_file: '{safe_source}', "
-                f"page: '{self._escape_string(doc['page'])}', "
-                f"chunk_index: '{self._escape_string(doc['chunk_index'])}', "
-                f"created_at: '{created_at}'}})"
-            )
-            if self._safe_execute(query):
+        # ── Phase 2a: Document nodes — one transaction ────────────────────────
+        # Kùzu 0.3.2 COPY FROM is restricted to the initial load of a pristine
+        # table and is unsupported for relationship tables entirely, so we use
+        # explicit BEGIN/COMMIT transactions throughout.
+        try:
+            self._connection.execute("BEGIN TRANSACTION")
+            for doc in document_nodes:
+                safe_cid = self._escape_string(doc["chunk_id"])
+                self._connection.execute(
+                    f"CREATE (:Document {{id: '{safe_cid}', library_id: '{safe_library}', "
+                    f"source_file: '{safe_source}', page: '{doc['page']}', "
+                    f"chunk_index: '{doc['chunk_index']}', created_at: '{created_at}'}})"
+                )
                 nodes_created += 1
+            self._connection.execute("COMMIT")
+            logger.info(f"[tx] {len(document_nodes)} Document nodes committed")
+        except Exception as e:
+            logger.error(f"Document nodes transaction failed: {e}")
+            try:
+                self._connection.execute("ROLLBACK")
+            except Exception:
+                pass
 
-            # Log progress for large documents
-            if (i + 1) % BATCH_SIZE == 0:
-                logger.debug(f"Created {i + 1}/{len(document_nodes)} document nodes")
-
-        # Phase 2b: Normalize and create entities (with deduplication)
+        # ── Phase 2b: Normalize entities (in memory) ─────────────────────────
         unique_entities: dict[str, dict] = {}  # canonical_key -> entity info
         for chunk_id, entities in all_chunk_entities.items():
             for entity in entities:
@@ -1055,85 +1084,76 @@ Important:
                     unique_entities[canonical_key] = {
                         "name": entity["name"],
                         "type": entity["type"],
-                        "chunk_ids": []
+                        "chunk_ids": [],
                     }
                 unique_entities[canonical_key]["chunk_ids"].append(chunk_id)
 
-        # Create or resolve entities and relationships
-        # Process in batches to avoid buffer exhaustion
-        entity_items = list(unique_entities.items())
-        entities_processed = 0
-
-        for canonical_key, entity_info in entity_items:
-            entity_id = self._entity_cache[library_id].get(canonical_key)
-
-            if not entity_id:
-                # Create new entity
-                new_entity_id = f"entity_{uuid.uuid4().hex[:8]}"
-                query = (
-                    f"CREATE (e:Entity {{"
-                    f"id: '{new_entity_id}', "
-                    f"library_id: '{safe_library}', "
-                    f"name: '{self._escape_string(entity_info['name'])}', "
-                    f"entity_type: '{self._escape_string(entity_info['type'])}'}})"
+        # Pre-assign IDs for new entities (cache miss = never seen before)
+        new_entities: list[tuple[str, str, dict]] = []
+        for canonical_key, entity_info in unique_entities.items():
+            if canonical_key not in self._entity_cache[library_id]:
+                new_entities.append(
+                    (canonical_key, f"entity_{uuid.uuid4().hex[:8]}", entity_info)
                 )
-                result = self._safe_execute(query)
-                if result is not None:
-                    nodes_created += 1
+
+        # ── Phase 2c: Entity nodes — one transaction (new only) ──────────────
+        if new_entities:
+            try:
+                self._connection.execute("BEGIN TRANSACTION")
+                for canonical_key, eid, entity_info in new_entities:
+                    safe_name = self._escape_string(entity_info["name"])
+                    safe_type = self._escape_string(entity_info["type"])
+                    self._connection.execute(
+                        f"CREATE (:Entity {{id: '{eid}', library_id: '{safe_library}', "
+                        f"name: '{safe_name}', entity_type: '{safe_type}'}})"
+                    )
+                self._connection.execute("COMMIT")
+                # Update in-memory cache only after successful commit
+                for canonical_key, new_entity_id, _ in new_entities:
                     self._entity_cache[library_id][canonical_key] = new_entity_id
-                    entity_id = new_entity_id
-                else:
-                    logger.warning(f"Failed to create entity: {entity_info['name']}")
-                    continue  # Skip relationships for failed entity
-
-            # Phase 3: Create relationships (Document -> Entity)
-            for chunk_id in entity_info["chunk_ids"]:
-                safe_chunk_id = self._escape_string(chunk_id)
-                # First verify both nodes exist
-                verify_query = (
-                    f"MATCH (d:Document {{id: '{safe_chunk_id}'}}), "
-                    f"(e:Entity {{id: '{entity_id}'}}) "
-                    f"RETURN d.id, e.id"
-                )
+                nodes_created += len(new_entities)
+                logger.info(f"[tx] {len(new_entities)} Entity nodes committed")
+            except Exception as e:
+                logger.error(f"Entity nodes transaction failed: {e}")
                 try:
-                    verify_result = self._connection.execute(verify_query)
-                    if not verify_result.has_next():
-                        logger.debug(
-                            f"Cannot create relationship: Document '{chunk_id}' "
-                            f"or Entity '{entity_id}' not found"
-                        )
-                        continue
-                except Exception as e:
-                    logger.debug(f"Verify query failed: {e}")
-                    continue
+                    self._connection.execute("ROLLBACK")
+                except Exception:
+                    pass
 
-                # Create relationship now that we know nodes exist
-                rel_query = (
-                    f"MATCH (d:Document {{id: '{safe_chunk_id}'}}), "
-                    f"(e:Entity {{id: '{entity_id}'}}) "
-                    f"CREATE (d)-[:HAS_ENTITY]->(e)"
-                )
-                try:
-                    self._connection.execute(rel_query)
+        # ── Phase 3: HAS_ENTITY relationships — one transaction ───────────────
+        has_entity_pairs = [
+            (chunk_id, self._entity_cache[library_id][canonical_key])
+            for canonical_key, entity_info in unique_entities.items()
+            if canonical_key in self._entity_cache[library_id]
+            for chunk_id in entity_info["chunk_ids"]
+        ]
+        if has_entity_pairs:
+            try:
+                self._connection.execute("BEGIN TRANSACTION")
+                for doc_id, entity_id in has_entity_pairs:
+                    safe_did = self._escape_string(doc_id)
+                    safe_eid = self._escape_string(entity_id)
+                    self._connection.execute(
+                        f"MATCH (d:Document {{id: '{safe_did}'}}), (e:Entity {{id: '{safe_eid}'}}) "
+                        f"CREATE (d)-[:HAS_ENTITY]->(e)"
+                    )
                     relationships_created += 1
-                except Exception as e:
-                    logger.warning(f"Failed to create relationship: {e}")
+                self._connection.execute("COMMIT")
+                logger.info(f"[tx] {len(has_entity_pairs)} HAS_ENTITY relationships committed")
+            except Exception as e:
+                logger.error(f"HAS_ENTITY transaction failed: {e}")
+                try:
+                    self._connection.execute("ROLLBACK")
+                except Exception:
+                    pass
 
-            # Log progress for large batches
-            entities_processed += 1
-            if entities_processed % BATCH_SIZE == 0:
-                logger.info(
-                    f"Entity storage progress: {entities_processed}/{len(entity_items)} entities, "
-                    f"{nodes_created} nodes, {relationships_created} relationships so far"
-                )
-
-        # Phase 4: Create document structure relationships (NEXT_CHUNK, SAME_PAGE)
+        # ── Phase 4: Document structure relationships (NEXT_CHUNK, SAME_PAGE) ─
         if rel_settings.document_structure.enabled:
             relationships_created += self._create_document_structure_relationships(
-                document_nodes, safe_library, rel_settings
+                document_nodes, rel_settings
             )
 
-        # Phase 5: Create entity-to-entity relationships
+        # ── Phase 5: Entity-to-entity relationships ───────────────────────────
         relationships_created += self._create_entity_relationships(
             library_id, all_chunk_relationships, rel_settings
         )
@@ -1148,59 +1168,72 @@ Important:
     def _create_document_structure_relationships(
         self,
         document_nodes: list[dict],
-        safe_library: str,
         rel_settings
     ) -> int:
-        """Create relationships between document chunks (NEXT_CHUNK, SAME_PAGE)."""
+        """Create NEXT_CHUNK and SAME_PAGE relationships in single transactions."""
         if self._connection is None:
             return 0
 
         relationships_created = 0
-
-        # Sort by chunk_index for sequential relationships
         sorted_nodes = sorted(document_nodes, key=lambda x: int(x.get("chunk_index", 0) or 0))
 
-        # NEXT_CHUNK relationships
-        if rel_settings.document_structure.next_chunk:
-            for i in range(len(sorted_nodes) - 1):
-                curr = sorted_nodes[i]
-                next_node = sorted_nodes[i + 1]
-                try:
-                    query = (
-                        f"MATCH (a:Document {{id: '{self._escape_string(curr['chunk_id'])}'}}), "
-                        f"(b:Document {{id: '{self._escape_string(next_node['chunk_id'])}'}}) "
-                        f"CREATE (a)-[:NEXT_CHUNK]->(b)"
-                    )
-                    self._connection.execute(query)
+        # ── NEXT_CHUNK — one transaction ──────────────────────────────────────
+        if rel_settings.document_structure.next_chunk and len(sorted_nodes) > 1:
+            next_chunk_queries = [
+                (
+                    f"MATCH (a:Document {{id: '{self._escape_string(sorted_nodes[i]['chunk_id'])}'}}), "
+                    f"(b:Document {{id: '{self._escape_string(sorted_nodes[i+1]['chunk_id'])}'}}) "
+                    f"CREATE (a)-[:NEXT_CHUNK]->(b)"
+                )
+                for i in range(len(sorted_nodes) - 1)
+            ]
+            try:
+                self._connection.execute("BEGIN TRANSACTION")
+                for q in next_chunk_queries:
+                    self._connection.execute(q)
                     relationships_created += 1
-                except Exception as e:
-                    logger.debug(f"Failed to create NEXT_CHUNK: {e}")
+                self._connection.execute("COMMIT")
+                logger.info(f"[tx] {len(next_chunk_queries)} NEXT_CHUNK relationships committed")
+            except Exception as e:
+                logger.error(f"NEXT_CHUNK transaction failed: {e}")
+                try:
+                    self._connection.execute("ROLLBACK")
+                except Exception:
+                    pass
 
-        # SAME_PAGE relationships
+        # ── SAME_PAGE — one transaction ───────────────────────────────────────
         if rel_settings.document_structure.same_page:
             page_groups: dict[str, list[dict]] = {}
             for node in document_nodes:
                 page = node.get("page", "")
                 if page:
-                    if page not in page_groups:
-                        page_groups[page] = []
-                    page_groups[page].append(node)
+                    page_groups.setdefault(page, []).append(node)
 
-            for page, nodes in page_groups.items():
-                if len(nodes) > 1:
-                    # Connect all nodes on same page
-                    for i, n1 in enumerate(nodes):
-                        for n2 in nodes[i+1:]:
-                            try:
-                                query = (
-                                    f"MATCH (a:Document {{id: '{self._escape_string(n1['chunk_id'])}'}}), "
-                                    f"(b:Document {{id: '{self._escape_string(n2['chunk_id'])}'}}) "
-                                    f"CREATE (a)-[:SAME_PAGE]->(b)"
-                                )
-                                self._connection.execute(query)
-                                relationships_created += 1
-                            except Exception as e:
-                                logger.debug(f"Failed to create SAME_PAGE: {e}")
+            same_page_queries = [
+                (
+                    f"MATCH (a:Document {{id: '{self._escape_string(n1['chunk_id'])}'}}), "
+                    f"(b:Document {{id: '{self._escape_string(n2['chunk_id'])}'}}) "
+                    f"CREATE (a)-[:SAME_PAGE]->(b)"
+                )
+                for nodes in page_groups.values()
+                if len(nodes) > 1
+                for i, n1 in enumerate(nodes)
+                for n2 in nodes[i + 1:]
+            ]
+            if same_page_queries:
+                try:
+                    self._connection.execute("BEGIN TRANSACTION")
+                    for q in same_page_queries:
+                        self._connection.execute(q)
+                        relationships_created += 1
+                    self._connection.execute("COMMIT")
+                    logger.info(f"[tx] {len(same_page_queries)} SAME_PAGE relationships committed")
+                except Exception as e:
+                    logger.error(f"SAME_PAGE transaction failed: {e}")
+                    try:
+                        self._connection.execute("ROLLBACK")
+                    except Exception:
+                        pass
 
         return relationships_created
 
@@ -1210,38 +1243,32 @@ Important:
         all_chunk_relationships: dict[str, list[dict]],
         rel_settings
     ) -> int:
-        """Create entity-to-entity relationships extracted from text."""
+        """Create entity-to-entity relationships in transactions grouped by type."""
         if self._connection is None:
             return 0
 
         relationships_created = 0
-        safe_library = self._escape_string(library_id)
-        seen_rels = set()  # Avoid duplicate relationships
-        buffer_errors = 0
-        MAX_BUFFER_ERRORS = 5  # Stop after too many buffer errors
-        BATCH_SIZE = 100  # Log progress every N relationships
+        seen_rels: set[str] = set()
 
-        # Collect all relationships first to process in batches
-        all_rels = []
-        for chunk_id, relationships in all_chunk_relationships.items():
+        # Collect and deduplicate all relationships in memory first
+        all_rels: list[dict] = []
+        for relationships in all_chunk_relationships.values():
             for rel in relationships:
                 source_name = rel["source"]
                 target_name = rel["target"]
                 rel_type = rel["type"]
 
-                # Create unique key for deduplication
                 rel_key = f"{source_name.lower()}|{target_name.lower()}|{rel_type}"
                 if rel_key in seen_rels:
                     continue
                 seen_rels.add(rel_key)
 
-                # Get entity IDs from cache
-                source_key = self._get_canonical_key(source_name, library_id)
-                target_key = self._get_canonical_key(target_name, library_id)
-
-                source_id = self._entity_cache.get(library_id, {}).get(source_key)
-                target_id = self._entity_cache.get(library_id, {}).get(target_key)
-
+                source_id = self._entity_cache.get(library_id, {}).get(
+                    self._get_canonical_key(source_name, library_id)
+                )
+                target_id = self._entity_cache.get(library_id, {}).get(
+                    self._get_canonical_key(target_name, library_id)
+                )
                 if not source_id or not target_id:
                     continue
 
@@ -1249,50 +1276,49 @@ Important:
                     "source_id": source_id,
                     "target_id": target_id,
                     "type": rel_type,
-                    "strength": rel.get("strength", "chunk") if rel_type == "CO_OCCURS" else None
+                    "strength": rel.get("strength", "chunk") if rel_type == "CO_OCCURS" else None,
                 })
 
-        logger.info(f"Creating {len(all_rels)} entity-to-entity relationships...")
+        if not all_rels:
+            return 0
 
-        # Process relationships in batches
-        for i, rel in enumerate(all_rels):
-            if buffer_errors >= MAX_BUFFER_ERRORS:
-                logger.warning(
-                    f"Stopping relationship creation after {buffer_errors} buffer errors. "
-                    f"Created {relationships_created}/{len(all_rels)} relationships."
-                )
-                break
+        logger.info(f"Writing {len(all_rels)} entity-to-entity relationships...")
 
+        # Group by relationship type — each type uses its own transaction so a
+        # failure in one type doesn't roll back the others.
+        by_type: dict[str, list[dict]] = {}
+        for rel in all_rels:
+            by_type.setdefault(rel["type"], []).append(rel)
+
+        for rel_type, rels in by_type.items():
             try:
-                if rel["type"] == "CO_OCCURS":
-                    query = (
-                        f"MATCH (a:Entity {{id: '{rel['source_id']}'}}), "
-                        f"(b:Entity {{id: '{rel['target_id']}'}}) "
-                        f"CREATE (a)-[:CO_OCCURS {{strength: '{rel['strength']}'}}]->(b)"
-                    )
-                else:
-                    query = (
-                        f"MATCH (a:Entity {{id: '{rel['source_id']}'}}), "
-                        f"(b:Entity {{id: '{rel['target_id']}'}}) "
-                        f"CREATE (a)-[:{rel['type']}]->(b)"
-                    )
-                self._connection.execute(query)
-                relationships_created += 1
-
+                self._connection.execute("BEGIN TRANSACTION")
+                for rel in rels:
+                    safe_src = self._escape_string(rel["source_id"])
+                    safe_tgt = self._escape_string(rel["target_id"])
+                    if rel_type == "CO_OCCURS":
+                        safe_str = self._escape_string(rel["strength"] or "chunk")
+                        query = (
+                            f"MATCH (a:Entity {{id: '{safe_src}'}}), "
+                            f"(b:Entity {{id: '{safe_tgt}'}}) "
+                            f"CREATE (a)-[:CO_OCCURS {{strength: '{safe_str}'}}]->(b)"
+                        )
+                    else:
+                        query = (
+                            f"MATCH (a:Entity {{id: '{safe_src}'}}), "
+                            f"(b:Entity {{id: '{safe_tgt}'}}) "
+                            f"CREATE (a)-[:{rel_type}]->(b)"
+                        )
+                    self._connection.execute(query)
+                    relationships_created += 1
+                self._connection.execute("COMMIT")
+                logger.info(f"[tx] {len(rels)} {rel_type} relationships committed")
             except Exception as e:
-                error_str = str(e).lower()
-                if "buffer" in error_str or "frame" in error_str or "memory" in error_str:
-                    buffer_errors += 1
-                    logger.warning(f"Buffer error #{buffer_errors}: {e}")
-                else:
-                    logger.debug(f"Failed to create {rel['type']} relationship: {e}")
-
-            # Log progress for large batches
-            if (i + 1) % BATCH_SIZE == 0:
-                logger.info(
-                    f"Relationship creation progress: {i + 1}/{len(all_rels)} "
-                    f"({relationships_created} created)"
-                )
+                logger.error(f"{rel_type} relationship transaction failed: {e}")
+                try:
+                    self._connection.execute("ROLLBACK")
+                except Exception:
+                    pass
 
         return relationships_created
 

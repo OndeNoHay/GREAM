@@ -3,15 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GraphRagExec - Local AI Server</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=20260422">
+    <title>KleamPy - Local AI Server</title>
+    <link rel="stylesheet" href="/static/css/style.css?v=20260424b">
     <script src="https://cdn.jsdelivr.net/npm/marked@14/marked.min.js"></script>
 </head>
 <body>
     <div class="app-container">
         <!-- Header -->
         <header class="header">
-            <h1>GraphRagExec</h1>
+            <div class="header-brand">
+                <img src="/static/img/KleamPy_logo_small.png" alt="KleamPy logo" class="header-logo" />
+                <img src="/static/img/KleamPy_name.png" alt="KleamPy" class="header-appname" />
+            </div>
             <div class="header-actions">
                 <button id="btn-settings" class="btn btn-icon" title="Settings">
                     <svg viewBox="0 0 24 24" width="20" height="20">
@@ -43,6 +46,7 @@
                     <button class="tab" data-tab="agents">Agents</button>
                     <button class="tab" data-tab="ingest">Import Documents</button>
                     <button class="tab" data-tab="sources">Sources</button>
+                    <button class="tab" data-tab="mcp" id="tab-btn-mcp">MCP <span id="mcp-status-badge" class="mcp-badge"></span></button>
                 </div>
 
                 <!-- Chat Tab -->
@@ -227,6 +231,36 @@
                                     </div>
                                 </div>
                             </div>
+                        </div>
+
+                        <!-- MCP Services panel inside Agents tab -->
+                        <div class="agents-mcp-section">
+                            <div class="agents-mcp-header">
+                                <span class="agents-mcp-title">MCP Services</span>
+                                <span id="agents-mcp-summary" class="agents-mcp-summary"></span>
+                            </div>
+                            <div id="agents-mcp-toggles" class="agents-mcp-toggles">
+                                <!-- Loaded dynamically -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- MCP Tab -->
+                <div id="tab-mcp" class="tab-content">
+                    <div class="mcp-container">
+                        <div class="mcp-header">
+                            <div class="mcp-header-left">
+                                <h3>MCP Servers</h3>
+                                <span id="mcp-summary" class="mcp-summary-text"></span>
+                            </div>
+                            <div class="mcp-header-actions">
+                                <button class="btn btn-secondary btn-sm" onclick="loadMCPStatus()" id="btn-mcp-refresh">Refresh</button>
+                                <button class="btn btn-primary btn-sm" onclick="restartAllMCPServers()" id="btn-mcp-restart-all">Restart All</button>
+                            </div>
+                        </div>
+                        <div id="mcp-server-list" class="mcp-server-list">
+                            <p class="placeholder-text">Loading MCP servers...</p>
                         </div>
                     </div>
                 </div>

@@ -2711,3 +2711,262 @@ function clearConsole() {
 
 window.toggleConsole = toggleConsole;
 window.clearConsole = clearConsole;
+
+// ================================================================
+// MCP Servers Tab
+// ================================================================
+
+let _mcpAutoRefreshTimer = null;
+
+async function loadMCPStatus() {
+    const listEl = document.getElementById('mcp-server-list');
+    const summaryEl = document.getElementById('mcp-summary');
+    const badgeEl = document.getElementById('mcp-status-badge');
+
+    if (listEl) listEl.innerHTML = '<p class="placeholder-text">Loading...</p>';
+
+    try {
+        const res = await fetch('/api/mcp/servers');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        renderMCPServers(data.servers || []);
+
+        const total = data.total || 0;
+        const running = data.running || 0;
+        if (summaryEl) summaryEl.textContent = `${running} / ${total} running`;
+
+        if (badgeEl) {
+            badgeEl.textContent = running;
+            badgeEl.className = 'mcp-badge ' + (
+                running === 0 ? 'badge-err' :
+                running < total ? 'badge-warn' : 'badge-ok'
+            );
+        }
+    } catch (err) {
+        if (listEl) listEl.innerHTML = `<p class="error-text">Failed to load MCP status: ${err.message}</p>`;
+    }
+}
+
+function renderMCPServers(servers) {
+    const listEl = document.getElementById('mcp-server-list');
+    if (!listEl) return;
+
+    if (!servers.length) {
+        listEl.innerHTML = '<p class="placeholder-text">No MCP servers defined in config/mcp_servers.yaml</p>';
+        return;
+    }
+
+    listEl.innerHTML = servers.map(srv => {
+        const stateClass = !srv.enabled ? 'card-disabled' :
+                           srv.running  ? 'card-running'  : 'card-stopped';
+        const dotClass   = !srv.enabled ? 'dot-disabled' :
+                           srv.running  ? 'dot-running'   : 'dot-stopped';
+        const stateLabel = !srv.enabled ? 'disabled' :
+                           srv.running  ? `${srv.tool_count} tool${srv.tool_count !== 1 ? 's' : ''}` : 'stopped';
+
+        const cmdStr = [srv.command, ...(srv.args || [])].join(' ');
+
+        const toolChips = (srv.tools || []).map(t =>
+            `<span class="mcp-tool-chip">${t}</span>`
+        ).join('');
+
+        const toolsSection = srv.running && srv.tools.length
+            ? `<button class="mcp-tools-toggle" onclick="toggleMCPTools(this)">show tools</button>
+               <div class="mcp-tools-list">${toolChips}</div>`
+            : '';
+
+        const restartBtn = srv.enabled
+            ? `<button class="btn btn-secondary btn-sm" onclick="restartMCPServer('${srv.name}', this)">${srv.running ? 'Restart' : 'Start'}</button>`
+            : '';
+
+        return `
+<div class="mcp-card ${stateClass}" id="mcp-card-${srv.name}">
+  <div class="mcp-card-header">
+    <span class="mcp-status-dot ${dotClass}"></span>
+    <span class="mcp-card-name">${srv.name}</span>
+    <span class="mcp-card-meta">${stateLabel}</span>
+    <div class="mcp-card-actions">${restartBtn}</div>
+  </div>
+  <div class="mcp-card-body">
+    <div class="mcp-cmd" title="${cmdStr}">${cmdStr}</div>
+    ${toolsSection}
+  </div>
+</div>`;
+    }).join('');
+}
+
+function toggleMCPTools(btn) {
+    const list = btn.nextElementSibling;
+    if (!list) return;
+    list.classList.toggle('open');
+    btn.textContent = list.classList.contains('open') ? 'hide tools' : 'show tools';
+}
+
+async function restartMCPServer(name, btnEl) {
+    const card = document.getElementById(`mcp-card-${name}`);
+    if (card) card.classList.add('restarting');
+    if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Restarting…'; }
+
+    try {
+        const res = await fetch(`/api/mcp/servers/${name}/restart`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+        await loadMCPStatus();
+    } catch (err) {
+        alert(`Failed to restart ${name}: ${err.message}`);
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Restart'; }
+        if (card) card.classList.remove('restarting');
+    }
+}
+
+async function restartAllMCPServers() {
+    const btn = document.getElementById('btn-mcp-restart-all');
+    if (btn) { btn.disabled = true; btn.textContent = 'Restarting…'; }
+
+    try {
+        const res = await fetch('/api/mcp/restart-all', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+        await loadMCPStatus();
+    } catch (err) {
+        alert(`Failed to restart all: ${err.message}`);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Restart All'; }
+    }
+}
+
+// Load MCP status when the tab is opened; also update the badge on load
+document.addEventListener('DOMContentLoaded', () => {
+    // Update badge on startup (without rendering the full list)
+    fetch('/api/mcp/servers')
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+            if (!data) return;
+            const badge = document.getElementById('mcp-status-badge');
+            if (!badge) return;
+            const running = data.running || 0;
+            const total   = data.total   || 0;
+            badge.textContent = running;
+            badge.className = 'mcp-badge ' + (
+                running === 0 ? 'badge-err' :
+                running < total ? 'badge-warn' : 'badge-ok'
+            );
+        })
+        .catch(() => {});
+
+    // Load full status when tab becomes active
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            if (tab.dataset.tab === 'mcp') {
+                loadMCPStatus();
+            }
+        });
+    });
+});
+
+// ================================================================
+// MCP toggles in Agents tab
+// ================================================================
+
+async function loadAgentsMCPToggles() {
+    const container = document.getElementById('agents-mcp-toggles');
+    const summary   = document.getElementById('agents-mcp-summary');
+    if (!container) return;
+
+    try {
+        const res = await fetch('/api/mcp/servers');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        renderAgentsMCPToggles(data.servers || []);
+        if (summary) {
+            const running = data.running || 0;
+            const enabled = (data.servers || []).filter(s => s.enabled).length;
+            summary.textContent = `${running} running · ${enabled} enabled`;
+        }
+    } catch (err) {
+        if (container) container.innerHTML = `<span style="color:var(--error-color);font-size:.8rem">Error loading MCP status</span>`;
+    }
+}
+
+function renderAgentsMCPToggles(servers) {
+    const container = document.getElementById('agents-mcp-toggles');
+    if (!container) return;
+
+    container.innerHTML = servers.map(srv => {
+        const pillClass = !srv.enabled ? 'pill-disabled' : srv.running ? 'pill-running' : 'pill-stopped';
+        const dotTitle  = !srv.enabled ? 'disabled' : srv.running ? `running · ${srv.tool_count} tools` : 'stopped';
+        const checked   = srv.enabled ? 'checked' : '';
+        const tools     = srv.enabled && srv.tools.length
+            ? ` title="Tools: ${srv.tools.join(', ')}"`
+            : '';
+
+        return `
+<div class="mcp-toggle-pill ${pillClass}" id="agents-pill-${srv.name}"${tools}>
+  <span class="pill-dot" title="${dotTitle}"></span>
+  <span class="pill-name">${srv.name}</span>
+  <label class="mcp-switch" title="${srv.enabled ? 'Click to disable' : 'Click to enable'}">
+    <input type="checkbox" ${checked}
+           onchange="toggleMCPEnabled('${srv.name}', this.checked, this)"
+           id="mcp-chk-${srv.name}">
+    <span class="mcp-switch-track"></span>
+  </label>
+</div>`;
+    }).join('');
+}
+
+async function toggleMCPEnabled(name, enabled, checkboxEl) {
+    if (checkboxEl) checkboxEl.disabled = true;
+    const pill = document.getElementById(`agents-pill-${name}`);
+    if (pill) pill.style.opacity = '0.5';
+
+    try {
+        const res = await fetch(`/api/mcp/servers/${name}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+
+        // Refresh both the agents panel and the MCP tab badge
+        await loadAgentsMCPToggles();
+        // Also refresh the MCP tab if it's open
+        if (document.getElementById('tab-mcp')?.classList.contains('active')) {
+            await loadMCPStatus();
+        } else {
+            // Just update badge
+            fetch('/api/mcp/servers')
+                .then(r => r.ok ? r.json() : null)
+                .then(d => {
+                    if (!d) return;
+                    const badge = document.getElementById('mcp-status-badge');
+                    if (!badge) return;
+                    badge.textContent = d.running;
+                    badge.className = 'mcp-badge ' + (
+                        d.running === 0 ? 'badge-err' :
+                        d.running < d.total ? 'badge-warn' : 'badge-ok'
+                    );
+                }).catch(() => {});
+        }
+    } catch (err) {
+        alert(`Failed to ${enabled ? 'enable' : 'disable'} ${name}: ${err.message}`);
+        // Revert checkbox
+        if (checkboxEl) { checkboxEl.checked = !enabled; checkboxEl.disabled = false; }
+        if (pill) pill.style.opacity = '1';
+    }
+}
+
+// Hook: load MCP toggles when Agents tab is opened
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            if (tab.dataset.tab === 'agents') {
+                loadAgentsMCPToggles();
+            }
+        });
+    });
+    // Also load on first paint if agents tab is default (it's not, but just in case)
+    if (document.getElementById('tab-agents')?.classList.contains('active')) {
+        loadAgentsMCPToggles();
+    }
+});

@@ -33,6 +33,7 @@ from app.api.routes import (
     agents_router,
     logs_router,
     viewer_router,
+    mcp_router,
 )
 from app.services.vector_db import get_vector_db_service
 from app.services.graph_db import get_graph_db_service
@@ -192,6 +193,7 @@ app.include_router(agents_router)
 app.include_router(graph_router)
 app.include_router(logs_router)
 app.include_router(viewer_router)
+app.include_router(mcp_router)
 
 
 # Mount static files
